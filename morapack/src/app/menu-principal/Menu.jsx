@@ -9,7 +9,7 @@ export default function Menu() {
         <div>
             <header className="header-proyecto">
                 <h1>MoraPack</h1>
-                <img src="/icons/usuario-perfil.png" width="30" height="30" />
+                <img src="/icons/usuario/usuario-perfil.png" width="30" height="30" />
             </header>
 
             <div className="principal">
