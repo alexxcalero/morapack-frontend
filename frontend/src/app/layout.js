@@ -1,12 +1,12 @@
 import "./globals.css";
-import { Jockey_One } from 'next/font/google';
-import Cabecera from './components/Cabecera/Cabecera'
+import { Jockey_One } from "next/font/google";
+import Cabecera from "./components/Cabecera/Cabecera";
 import EmotionProvider from "./EmotionProvider";
 import PiePagina from "./components/PiePagina/PiePagina";
 
 const jockeyOne = Jockey_One({
-  subsets: ['latin'],
-  weight: '400',
+  subsets: ["latin"],
+  weight: "400",
 });
 
 export const metadata = {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }) {
         <EmotionProvider>
           <Cabecera />
           <main className="pb-16">{children}</main>
-          <PiePagina/>
+          <PiePagina />
         </EmotionProvider>
       </body>
     </html>

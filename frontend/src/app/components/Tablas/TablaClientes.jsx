@@ -161,7 +161,7 @@ function EnhancedTableToolbar(props) {
             <IconButton><FilterListIcon /></IconButton>
           </Tooltip>
 
-          <Tooltip title="Cargar archivo">
+          {/*<Tooltip title="Cargar archivo">
             <IconButton component="label">
               <input
                 hidden
@@ -176,7 +176,7 @@ function EnhancedTableToolbar(props) {
               />
               <CloudUploadIcon />
             </IconButton>
-          </Tooltip>
+          </Tooltip>*/}
         </>
       )}
     </Toolbar>
@@ -244,9 +244,9 @@ export default function TablaClientes() {
     console.log('Eliminar id', id);
   };
 
-  const handleEditRow = (id) => {
+  {/*const handleEditRow = (id) => {
     console.log('Editar id', id);
-  };
+  };*/}
 
   const handleChangePage = (event, newPage) => setPage(newPage);
   const handleChangeRowsPerPage = (event) => { setRowsPerPage(parseInt(event.target.value, 10)); setPage(0); };
@@ -308,11 +308,11 @@ export default function TablaClientes() {
                     </TableCell>
 
                     <TableCell align="right">
-                      <Tooltip title="Editar">
+                      {/*<Tooltip title="Editar">
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleEditRow(row.id); }}>
                           <EditIcon fontSize="small" />
                         </IconButton>
-                      </Tooltip>
+                      </Tooltip>*/}
                       <Tooltip title="Eliminar">
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDeleteRow(row.id); }}>
                           <DeleteIcon fontSize="small" />

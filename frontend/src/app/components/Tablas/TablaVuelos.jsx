@@ -1,3 +1,4 @@
+// src/app/components/Tablas/TablaVuelos.jsx
 "use client";
 
 import * as React from "react";
@@ -22,18 +23,19 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import Switch from "@mui/material/Switch";
 import DeleteIcon from "@mui/icons-material/Delete";
 import FilterListIcon from "@mui/icons-material/FilterList";
-import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { visuallyHidden } from "@mui/utils";
 import { useRouter } from "next/navigation";
 
+/* ------------------ helpers de ordenamiento ------------------ */
 function descendingComparator(a, b, orderBy) {
   const va = a[orderBy];
   const vb = b[orderBy];
 
-  const isIsoDate = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v);
+  // detectar ISO-like strings y compararlos como fechas
+  const isIsoDateString = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v);
 
-  if (isIsoDate(va) && isIsoDate(vb)) {
+  if (isIsoDateString(va) && isIsoDateString(vb)) {
     const da = Date.parse(va);
     const db = Date.parse(vb);
     if (db < da) return -1;
@@ -41,12 +43,14 @@ function descendingComparator(a, b, orderBy) {
     return 0;
   }
 
+  // numérico
   if (typeof vb === "number" && typeof va === "number") {
     if (vb < va) return -1;
     if (vb > va) return 1;
     return 0;
   }
 
+  // string (alfabético, case-insensitive)
   if (typeof vb === "string" && typeof va === "string") {
     return vb.localeCompare(va, undefined, { sensitivity: "base" });
   }
@@ -62,6 +66,7 @@ function getComparator(order, orderBy) {
     : (a, b) => -descendingComparator(a, b, orderBy);
 }
 
+/* ------------------ headers ------------------ */
 const headCells = [
   { id: "idTramo", numeric: true, disablePadding: true, label: "ID" },
   { id: "ciudadOrigenDisplay", numeric: false, disablePadding: false, label: "Origen" },
@@ -97,8 +102,11 @@ function EnhancedTableHead(props) {
             sortDirection={orderBy === headCell.id ? order : false}
             sx={{ fontWeight: 600 }}
           >
-            <TableSortLabel active={orderBy === headCell.id} 
-            direction={orderBy === headCell.id ? order : "asc"} onClick={createSortHandler(headCell.id)}>
+            <TableSortLabel
+              active={orderBy === headCell.id}
+              direction={orderBy === headCell.id ? order : "asc"}
+              onClick={createSortHandler(headCell.id)}
+            >
               {headCell.label}
               {orderBy === headCell.id ? (
                 <Box component="span" sx={visuallyHidden}>
@@ -160,22 +168,13 @@ function EnhancedTableToolbar({ numSelected, onFilesSelected, onRefresh }) {
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="Cargar archivo">
+          {/* Si algún día quieres cargar archivo: */}
+          {/* <Tooltip title="Cargar archivo">
             <IconButton component="label">
-              <input
-                hidden
-                accept=".csv,application/vnd.ms-excel,text/csv"
-                type="file"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (!files || files.length === 0) return;
-                  if (typeof onFilesSelected === "function") onFilesSelected(files);
-                  e.target.value = null;
-                }}
-              />
+              <input hidden accept=".csv,application/vnd.ms-excel,text/csv" type="file" onChange={(e)=>{/*...*\/}} />
               <CloudUploadIcon />
             </IconButton>
-          </Tooltip>
+          </Tooltip> */}
         </>
       )}
     </Toolbar>
@@ -188,6 +187,7 @@ EnhancedTableToolbar.propTypes = {
   onRefresh: PropTypes.func,
 };
 
+/* ------------------ componente principal ------------------ */
 export default function TablaVuelos({ initialRows = [] }) {
   const router = useRouter();
   const [rows, setRows] = React.useState(initialRows);
@@ -254,13 +254,16 @@ export default function TablaVuelos({ initialRows = [] }) {
   const formatFecha = (raw) => {
     if (!raw) return "N/D";
     try {
-      return new Date(raw).toLocaleString();
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) return d.toLocaleString();
+      return String(raw);
     } catch {
-      return raw;
+      return String(raw);
     }
   };
 
   const handleRefresh = () => {
+    // Simple refresh: recarga la página (puedes adaptar a fetchFlights si usas esa caché)
     router.refresh();
   };
 
@@ -270,18 +273,30 @@ export default function TablaVuelos({ initialRows = [] }) {
         <EnhancedTableToolbar numSelected={selected.length} onFilesSelected={() => {}} onRefresh={handleRefresh} />
         <TableContainer sx={{ flex: "1 1 auto", maxHeight: "100%" }}>
           <Table stickyHeader sx={{ minWidth: 750 }} aria-labelledby="tableTitle" size={dense ? "small" : "medium"}>
-            <EnhancedTableHead numSelected={selected.length} 
-            order={order} orderBy={orderBy} 
-            onSelectAllClick={handleSelectAllClick} onRequestSort={handleRequestSort} rowCount={rows.length} />
+            <EnhancedTableHead
+              numSelected={selected.length}
+              order={order}
+              orderBy={orderBy}
+              onSelectAllClick={handleSelectAllClick}
+              onRequestSort={handleRequestSort}
+              rowCount={rows.length}
+            />
             <TableBody>
               {visibleRows.map((row, index) => {
                 const isItemSelected = isSelected(row.idTramo);
                 const labelId = `enhanced-table-checkbox-${index}`;
 
                 return (
-                  <TableRow hover onClick={(event) => handleClick(event, row.idTramo)} 
-                  role="checkbox" aria-checked={isItemSelected} tabIndex={-1} key={row.idTramo} 
-                  selected={isItemSelected} sx={{ cursor: "pointer", height: dense ? 40 : 56 }}>
+                  <TableRow
+                    hover
+                    onClick={(event) => handleClick(event, row.idTramo)}
+                    role="checkbox"
+                    aria-checked={isItemSelected}
+                    tabIndex={-1}
+                    key={row.idTramo}
+                    selected={isItemSelected}
+                    sx={{ cursor: "pointer", height: dense ? 40 : 56 }}
+                  >
                     <TableCell padding="checkbox">
                       <Checkbox color="primary" checked={isItemSelected} inputProps={{ "aria-labelledby": labelId }} />
                     </TableCell>
@@ -312,12 +327,17 @@ export default function TablaVuelos({ initialRows = [] }) {
 
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", px: 2 }}>
           <FormControlLabel control={<Switch checked={dense} onChange={handleChangeDense} />} label="Vista compacta" />
-          <TablePagination 
-          rowsPerPageOptions={[5, 10, 20]} 
-          component="div" count={rows.length} 
-          rowsPerPage={rowsPerPage} page={page} 
-          onPageChange={handleChangePage} onRowsPerPageChange={handleChangeRowsPerPage} 
-          showFirstButton showLastButton />
+          <TablePagination
+            rowsPerPageOptions={[5, 10, 20]}
+            component="div"
+            count={rows.length}
+            rowsPerPage={rowsPerPage}
+            page={page}
+            onPageChange={handleChangePage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            showFirstButton
+            showLastButton
+          />
         </Box>
       </Paper>
     </Box>
