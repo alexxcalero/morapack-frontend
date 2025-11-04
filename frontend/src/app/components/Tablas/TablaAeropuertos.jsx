@@ -158,7 +158,7 @@ function EnhancedTableToolbar({ numSelected, onFilesSelected, onRefresh }) {
             <IconButton><FilterListIcon /></IconButton>
           </Tooltip>
 
-          <Tooltip title="Cargar archivo">
+          {/*<Tooltip title="Cargar archivo">
             <IconButton component="label">
               <input
                 hidden
@@ -174,7 +174,7 @@ function EnhancedTableToolbar({ numSelected, onFilesSelected, onRefresh }) {
               />
               <CloudUploadIcon />
             </IconButton>
-          </Tooltip>
+          </Tooltip>*/}
         </>
       )}
     </Toolbar>
@@ -227,9 +227,9 @@ export default function TablaAeropuertos({ initialRows = [] }) {
     setSelected(newSelected);
   };
 
-  const handleEditRow = (id) => {
+  {/*const handleEditRow = (id) => {
     console.log("Editar", id);
-  };
+  };*/}
 
   const handleDeleteRow = (id) => {
     if (!confirm(`Eliminar aeropuerto id ${id}?`)) return;
@@ -317,11 +317,11 @@ export default function TablaAeropuertos({ initialRows = [] }) {
                     </TableCell>
 
                     <TableCell align="right">
-                      <Tooltip title="Editar">
+                      {/*<Tooltip title="Editar">
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleEditRow(row.id); }}>
                           <EditIcon fontSize="small" />
                         </IconButton>
-                      </Tooltip>
+                      </Tooltip>*/}
                       <Tooltip title="Eliminar">
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDeleteRow(row.id); }}>
                           <DeleteIcon fontSize="small" />
