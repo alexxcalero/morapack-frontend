@@ -40,16 +40,14 @@ export default function HoraActual({
 
     async function decideStart() {
       try {
-        // 1) Si startStr se pasó explícito -> usarlo (2h antes)
-        if (startStr) {
-          const parsed = parseSpanishDatetime(startStr);
-          const startMs = parsed ? parsed.getTime() - 2 * 60 * 60 * 1000 : Date.now() - 2 * 60 * 60 * 1000;
+        if (typeof startStr === "string" && startStr.toLowerCase() === "now") {
+          const startMs = Date.now(); // inicio ahora (sin restar 2h)
           initSim({ startMs, stepMs: 1000, speed: 1 });
-          if (mounted) setStatusMsg(`Sim. iniciada: ${new Date(startMs).toLocaleString()}`);
+          if (mounted) setStatusMsg(`Sim. iniciada ahora: ${new Date(startMs).toLocaleString()}`);
           return;
         }
 
-        // 2) startStr no proporcionado -> buscar TODOS los vuelos y tomar la fecha mínima
+        // startStr no proporcionado -> buscar TODOS los vuelos y tomar la fecha mínima
         setStatusMsg("Obteniendo vuelos para determinar inicio...");
         const vuelos = await fetchVuelos({ force: false });
 
@@ -88,7 +86,7 @@ export default function HoraActual({
       } catch (err) {
         console.error("HoraActual decideStart error:", err);
         const fallback = Date.now() - 2 * 60 * 60 * 1000;
-        try { initSim({ startMs: fallback, stepMs: 1000, speed: 1 }); } catch (e) {}
+        try { initSim({ startMs: fallback, stepMs: 1000, speed: 1 }); } catch (e) { }
         if (mounted) setStatusMsg("Error al obtener vuelos: sim iniciada (fallback)");
       }
     }
