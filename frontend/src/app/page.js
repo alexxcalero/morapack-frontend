@@ -1,4 +1,4 @@
-import MapaClient from "./components/Mapa/MapaClient";
+import MapaClientDia from "./components/Mapa/MapaClientDia";
 
 export const metadata = {
   title: "Simulación Diaria | MoraPack",
@@ -7,7 +7,7 @@ export const metadata = {
 export default function Home() {
   return (
     <main>
-      <MapaClient />
+      <MapaClientDia />
     </main>
   );
 }
