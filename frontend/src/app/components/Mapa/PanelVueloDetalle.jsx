@@ -140,7 +140,7 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
                             {enviosAsignados.map((e, idx) => (
                                 <div key={idx} style={{ background: "white", borderRadius: 8, border: "1px solid #e2e8f0", padding: 10 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                                        <span style={{ fontSize: 12, fontWeight: 700 }}>Envío #{e.envioId ?? e.id ?? (idx + 1)}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>Envío #{e.envioId ?? e.id ?? (idx + 1)}</span>
                                         <span style={{ fontSize: 11, background: "#dbeafe", color: "#1e40af", borderRadius: 4, padding: "2px 8px", fontWeight: 700 }}>
                                             {e.cantidad ?? e.cantidadAsignada ?? 0} u
                                         </span>
@@ -167,8 +167,8 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
                         <Clock size={16} color="#1976d2" />
                         <span style={{ fontSize: 13, fontWeight: 700, color: "#1976d2" }}>Horarios</span>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#64748b" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
                             <span>Salida</span>
                             <strong>{vuelo.horaOrigen?.toLocaleString() ?? "N/A"}</strong>
                         </div>

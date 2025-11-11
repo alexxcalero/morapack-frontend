@@ -254,6 +254,7 @@ export default function Mapa() {
   const mapRef = useRef(null);
   const [rawAirports, setRawAirports] = useState(null);
   const [rawVuelos, setRawVuelos] = useState(null);
+  const [vuelosCache, setVuelosCache] = useState([]); // ← NUEVO: caché local de vuelos
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [vueloSeleccionado, setVueloSeleccionado] = useState(null);
   const [vueloDetalleCompleto, setVueloDetalleCompleto] = useState(null);
@@ -313,11 +314,26 @@ export default function Mapa() {
           return;
         }
         const data = await res.json();
-        // Guardar horizonte (inicio / fin) para sincronizar simulación
         setHorizonte(data?.horizonte || null);
-        const vuelos = Array.isArray(data?.vuelos) ? data.vuelos : [];
-        console.log('✈️ Vuelos procesados:', vuelos.length); // Debug
-        setRawVuelos(vuelos);
+        const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
+
+        // ✅ FUSIONAR: Preservar vuelos del cache que aún están volando
+        setVuelosCache(prev => {
+          const ahora = Date.now();
+          const vuelosVigentes = prev.filter(v => {
+            const llegada = parsePlanificadorTime(v.horaLlegada);
+            return llegada && llegada.getTime() > ahora; // solo los que aún no llegaron
+          });
+
+          // Crear mapa de IDs de vuelos nuevos para evitar duplicados
+          const idsNuevos = new Set(vuelosNuevos.map(v => v.id));
+          const vuelosAntiguos = vuelosVigentes.filter(v => !idsNuevos.has(v.id));
+
+          return [...vuelosNuevos, ...vuelosAntiguos];
+        });
+
+        setRawVuelos(vuelosNuevos);
+        console.log('✈️ Vuelos procesados:', vuelosNuevos.length);
       } catch (err) {
         console.error("fetch vuelos-ultimo-ciclo:", err);
         if (mounted) setRawVuelos([]);
@@ -374,11 +390,11 @@ export default function Mapa() {
     return map;
   }, [airports]);
 
-  // Mapear respuesta de /api/planificador/vuelos-ultimo-ciclo al formato usado por el mapa
+  // Mapear respuesta usando vuelosCache en lugar de rawVuelos
   const vuelos = useMemo(() => {
-    if (!Array.isArray(rawVuelos)) return [];
+    if (!Array.isArray(vuelosCache)) return [];
 
-    return rawVuelos.map(p => {
+    return vuelosCache.map(p => {
       // origen/destino vienen como objetos { id, codigo, ciudad, pais }
       const origenAirport = p.origen?.id && airportsById[p.origen.id] ? airportsById[p.origen.id] : null;
       const destinoAirport = p.destino?.id && airportsById[p.destino.id] ? airportsById[p.destino.id] : null;
@@ -400,7 +416,7 @@ export default function Mapa() {
       }, 0);
 
       return {
-        raw: { ...p, capacidadOcupada }, // sobrescribir con valor calculado
+        raw: { ...p, capacidadOcupada },
         idTramo: p.id ?? p.vueloBaseId ?? null,
         latOrigen, lonOrigen, latDestino, lonDestino,
         horaOrigen, horaDestino,
@@ -413,7 +429,7 @@ export default function Mapa() {
       v.horaOrigen instanceof Date && !isNaN(v.horaOrigen.getTime()) &&
       v.horaDestino instanceof Date && !isNaN(v.horaDestino.getTime())
     );
-  }, [rawVuelos, airportsById]);
+  }, [vuelosCache, airportsById]); // ← cambiar rawVuelos por vuelosCache
 
   const calcularPosicion = (vuelo, nowMsLocal) => {
     const latA = vuelo.latOrigen; const lonA = vuelo.lonOrigen; const latB = vuelo.latDestino; const lonB = vuelo.lonDestino;
@@ -465,12 +481,12 @@ export default function Mapa() {
     // Mantener límite alto para performance, pero después de ordenar (asegura incluir todos con envíos)
     const MAX = 400;
     return list.slice(0, MAX);
-  }, [vuelos, nowMs]);
+  }, [vuelos, nowMs, calcularPosicion]); // ← añadir calcularPosicion como dependencia
 
   // Solo vuelos en el aire que sí tienen envíos (para el catálogo)
   const vuelosConEnvios = useMemo(() => {
     return vuelosFiltrados.filter(v => v.tieneEnvios);
-  }, [vuelosFiltrados]);
+  }, [vuelosFiltrados]); // ← ya depende de vuelosFiltrados que incluye nowMs
 
   const vuelosFiltradosCount = vuelosFiltrados.length; // (sin cambios en lógica de auto-avance)
 
