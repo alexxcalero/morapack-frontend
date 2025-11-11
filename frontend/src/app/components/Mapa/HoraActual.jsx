@@ -1,9 +1,8 @@
 // src/app/components/Mapa/HoraActual.jsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { initSim, subscribe, getSimMs, parseSpanishDatetime } from "../../../lib/simTime";
-import { fetchVuelos, getCachedFlights } from "../../../lib/vuelos";
 
 /**
  * parseBackendTime: convierte "2025-01-01 03:34:00Z-5" -> Date (instante UTC correcto)
@@ -35,6 +34,17 @@ export default function HoraActual({
 }) {
   const [statusMsg, setStatusMsg] = useState("");
 
+  // ⭐ Nuevos refs para anclar inicios y poder calcular transcurridos
+  const simStartRef = useRef(null);
+  const realStartRef = useRef(null);
+
+  // ⭐ Reloj de tiempo real
+  const [realNowMs, setRealNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const iv = setInterval(() => setRealNowMs(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -43,53 +53,24 @@ export default function HoraActual({
         // 1) Si startStr se pasó explícito -> usarlo (2h antes)
         if (startStr) {
           const parsed = parseSpanishDatetime(startStr);
-          const startMs = parsed ? parsed.getTime() - 2 * 60 * 60 * 1000 : Date.now() - 2 * 60 * 60 * 1000;
+          const startMs = parsed ? parsed.getTime() : Date.now();
           initSim({ startMs, stepMs: 1000, speed: 1 });
+          // ⭐ Anclar inicios
+          simStartRef.current = startMs;
+          realStartRef.current = Date.now();
           if (mounted) setStatusMsg(`Sim. iniciada: ${new Date(startMs).toLocaleString()}`);
           return;
         }
 
-        // 2) startStr no proporcionado -> buscar TODOS los vuelos y tomar la fecha mínima
-        setStatusMsg("Obteniendo vuelos para determinar inicio...");
-        const vuelos = await fetchVuelos({ force: false });
-
-        if (!Array.isArray(vuelos) || vuelos.length === 0) {
-          const fallback = Date.now() - 2 * 60 * 60 * 1000;
-          initSim({ startMs: fallback, stepMs: 1000, speed: 1 });
-          if (mounted) setStatusMsg("No hay vuelos: sim. iniciada (ahora -2h)");
-          return;
-        }
-
-        // parsear todas las horas de salida y quedarnos con la mínima
-        const parsedPairs = vuelos
-          .map(v => {
-            const s = v.horaOrigen ?? v.horaOrigenStr ?? v.hora_salida ?? v.hora_salida_local ?? "";
-            const d = parseBackendTime(s);
-            return { raw: v, d };
-          })
-          .filter(x => x.d instanceof Date && !isNaN(x.d.getTime()));
-
-        if (!parsedPairs.length) {
-          const fallback = Date.now() - 2 * 60 * 60 * 1000;
-          initSim({ startMs: fallback, stepMs: 1000, speed: 1 });
-          if (mounted) setStatusMsg("No se pudieron parsear horas: sim. iniciada (ahora -2h)");
-          return;
-        }
-
-        // encontrar la mínima (la fecha más temprana)
-        let min = parsedPairs[0];
-        for (let i = 1; i < parsedPairs.length; i++) {
-          if (parsedPairs[i].d.getTime() < min.d.getTime()) min = parsedPairs[i];
-        }
-
-        const startMs = min.d.getTime() - 2 * 60 * 60 * 1000; // 2 horas antes
-        initSim({ startMs, stepMs: 1000, speed: 1 });
-        if (mounted) setStatusMsg(`Sim. iniciada 2h antes del vuelo mínimo (id ${min.raw.idTramo ?? min.raw.id ?? "?"}): ${new Date(startMs).toLocaleString()}`);
+        // 2) startStr no proporcionado -> iniciar 2h antes de ahora
+        const fallback = Date.now() - 2 * 60 * 60 * 1000;
+        initSim({ startMs: fallback, stepMs: 1000, speed: 1 });
+        // ⭐ Anclar inicios
+        simStartRef.current = fallback;
+        realStartRef.current = Date.now();
+        if (mounted) setStatusMsg("Sim. iniciada (ahora -2h)");
       } catch (err) {
         console.error("HoraActual decideStart error:", err);
-        const fallback = Date.now() - 2 * 60 * 60 * 1000;
-        try { initSim({ startMs: fallback, stepMs: 1000, speed: 1 }); } catch (e) {}
-        if (mounted) setStatusMsg("Error al obtener vuelos: sim iniciada (fallback)");
       }
     }
 
@@ -98,25 +79,46 @@ export default function HoraActual({
     // startStr es dependencia por si quieres forzar cambio
   }, [startStr]);
 
+  // Suscripción al tiempo de simulación
   const [nowMs, setNowMs] = useState(() => getSimMs());
   useEffect(() => {
-    const unsub = subscribe((ms) => setNowMs(ms));
+    const unsub = subscribe((ms) => {
+      setNowMs(ms);
+      // ⭐ Si no tenemos anclado inicio simulado (por ejemplo, si otro componente llamó initSim)
+      if (simStartRef.current == null) simStartRef.current = ms;
+      if (realStartRef.current == null) realStartRef.current = Date.now();
+    });
     return () => unsub();
   }, []);
 
-  const now = new Date(nowMs);
-
+  // Formateadores
   const localeToUse = locale || (typeof navigator !== "undefined" ? navigator.language : "es-PE");
-  const timeStr = now.toLocaleTimeString(localeToUse, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const now = new Date(nowMs);
+  const realNow = new Date(realNowMs);
+
   const dateStr = now.toLocaleDateString(localeToUse, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+  const timeStr = now.toLocaleTimeString(localeToUse, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const realDateStr = realNow.toLocaleDateString(localeToUse, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+  const realTimeStr = realNow.toLocaleTimeString(localeToUse, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   const tzOffsetMin = -now.getTimezoneOffset();
   const tzSign = tzOffsetMin >= 0 ? "+" : "-";
   const tzHours = Math.floor(Math.abs(tzOffsetMin) / 60);
   const tzMins = Math.abs(tzOffsetMin) % 60;
   const tzStr = `UTC${tzSign}${String(tzHours).padStart(2, "0")}:${String(tzMins).padStart(2, "0")}`;
-
   const utcStr = new Date(now.getTime() + now.getTimezoneOffset() * 60000).toISOString().replace("T", " ").split(".")[0];
+
+  // ⭐ Formatear duración (DD d HH:MM:SS)
+  function formatDuration(ms) {
+    let s = Math.max(0, Math.floor(ms / 1000));
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60); const sec = s - m * 60;
+    return `${String(d).padStart(2, "0")}d ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+
+  const simElapsedStr = simStartRef.current != null ? formatDuration(nowMs - simStartRef.current) : "—";
+  const realElapsedStr = realStartRef.current != null ? formatDuration(realNowMs - realStartRef.current) : "—";
 
   const baseStyle = {
     position: "relative",
@@ -127,7 +129,7 @@ export default function HoraActual({
     borderRadius: 8,
     boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
     padding: "8px 12px",
-    minWidth: 220,
+    minWidth: 260,
     fontFamily: "Inter, Roboto, Arial, sans-serif",
     fontSize: 13,
     color: "#111",
@@ -136,8 +138,33 @@ export default function HoraActual({
 
   return (
     <div style={baseStyle} aria-live="polite" role="status">
-      <div style={{ fontSize: 12, opacity: 0.85 }}>{dateStr}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, lineHeight: 1 }}>{timeStr}</div>
+      {/* Momento SIMULADO (fecha y hora con segundos) */}
+      <div style={{ fontWeight: 700, color: "#0f172a" }}>Simulación</div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div>{dateStr}</div>
+        <div style={{ fontVariantNumeric: "tabular-nums" }}>{timeStr}</div>
+      </div>
+
+      {/* Momento ACTUAL (tiempo real) */}
+      <div style={{ marginTop: 6, fontWeight: 700, color: "#0f172a" }}>Tiempo real</div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <div>{realDateStr}</div>
+        <div style={{ fontVariantNumeric: "tabular-nums" }}>{realTimeStr}</div>
+      </div>
+
+      {/* Transcurridos */}
+      <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid #e5e7eb" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ opacity: 0.8 }}>Transcurrido sim.</div>
+          <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{simElapsedStr}</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+          <div style={{ opacity: 0.8 }}>Transcurrido real</div>
+          <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{realElapsedStr}</div>
+        </div>
+      </div>
+
+      {/* Zona UTC / estado (opcional) */}
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, opacity: 0.85 }}>
         <div>{tzStr}</div>
         {showUtc ? <div style={{ opacity: 0.9 }}>UTC: {utcStr}</div> : null}
