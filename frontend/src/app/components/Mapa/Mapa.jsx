@@ -15,7 +15,7 @@ import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
 
 // URL base del backend (misma usada en SimulationControls)
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -274,7 +274,7 @@ export default function Mapa() {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch("/api/aeropuertos");
+        const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`);
         if (!res.ok) throw new Error("fetch aeropuertos " + res.status);
         const data = await res.json();
         if (!mounted) return;

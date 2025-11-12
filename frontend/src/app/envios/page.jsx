@@ -6,7 +6,7 @@ export const metadata = {
   title: "Envíos | MoraPack",
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 const URL = `${API_BASE}/api/envios/obtenerTodos`;
 
 export default async function Page() {

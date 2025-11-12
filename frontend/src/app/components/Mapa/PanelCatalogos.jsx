@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, memo } from 'react';
 import { X, Package, Plane } from 'lucide-react';
 import { getSimMs } from '../../../lib/simTime';
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 // Función para parsear fechas del backend
 function parseBackendTime(s) {
@@ -162,7 +162,7 @@ export default function PanelCatalogos({
     // ✅ Solo pestañas soportadas; los otros endpoints 404 se eliminan
     const catalogos = [
         { id: 'aeropuertos', nombre: 'Aeropuertos', endpoint: '/api/aeropuertos' },
-        { id: 'vuelos', nombre: 'Vuelos Activos', endpoint: '/api/planificador/vuelos-ultimo-ciclo' }
+        { id: 'vuelos', nombre: 'Vuelos con Envio', endpoint: '/api/planificador/vuelos-ultimo-ciclo' }
     ];
 
     // Cargar aeropuertos para resolver nombres de ciudades
