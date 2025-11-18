@@ -5,27 +5,15 @@ import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
-import MenuIcon from '@mui/icons-material/Menu';
 import AccountCircle from '@mui/icons-material/AccountCircle';
-/* import Switch from '@mui/material/Switch';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import FormGroup from '@mui/material/FormGroup'; */
 import MenuItem from '@mui/material/MenuItem';
 import Menu from '@mui/material/Menu';
-import Drawer from '@mui/material/Drawer';
-import BarraLateral from '../BarraLateral/BarraLateral';
+import Button from '@mui/material/Button';
+import Link from 'next/link';
 
 export default function Cabecera() {
   const [auth, setAuth] = React.useState(true);
   const [anchorEl, setAnchorEl] = React.useState(null);
-
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
-  const toggleDrawer = (open) => () => setDrawerOpen(open);
-
-
-  const handleChange = (event) => {
-    setAuth(event.target.checked);
-  };
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -39,19 +27,31 @@ export default function Cabecera() {
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
-          <IconButton
-            size="large"
-            edge="start"
-            color="inherit"
-            aria-label="menu"
-            sx={{ mr: 2 }}
-            onClick={toggleDrawer(true)}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontFamily: 'Jockey One, sans-serif'}}>
+          <Typography variant="h6" component="div" sx={{ fontFamily: 'Jockey One, sans-serif', mr: 3 }}>
             MoraPack
           </Typography>
+
+          {/* Enlaces de navegación */}
+          <Box sx={{ flexGrow: 1, display: 'flex', gap: 2 }}>
+            <Link href="/simulacion-dia">
+              <Button color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                Monitoreo en tiempo real
+              </Button>
+            </Link>
+
+            <Link href="/simulacion-semanal">
+              <Button color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                Simulación semanal
+              </Button>
+            </Link>
+
+            <Link href="/simulacion-colapso">
+              <Button color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>
+                Simulación colapso
+              </Button>
+            </Link>
+          </Box>
+
           {auth && (
             <div>
               <IconButton
@@ -86,9 +86,6 @@ export default function Cabecera() {
           )}
         </Toolbar>
       </AppBar>
-      <Drawer anchor="left" open={drawerOpen} onClose={toggleDrawer(false)}>
-        <BarraLateral />
-      </Drawer>
 
     </Box>
   );

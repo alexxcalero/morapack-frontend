@@ -7,7 +7,7 @@ let _initialized = false;
 
 function notify() {
   for (const cb of Array.from(_subs)) {
-    try { cb(_currentMs); } catch (e) {}
+    try { cb(_currentMs); } catch (e) { }
   }
 }
 
@@ -39,7 +39,7 @@ export function parseSpanishDatetime(s) {
       if (up === "PM" && hh < 12) hh += 12;
       if (up === "AM" && hh === 12) hh = 0;
     }
-    const iso = `${String(yyyy).padStart(4,"0")}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}T${String(hh).padStart(2,"0")}:${min}:${sec}Z`;
+    const iso = `${String(yyyy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}T${String(hh).padStart(2, "0")}:${min}:${sec}Z`;
     const date = new Date(iso);
     return isNaN(date.getTime()) ? null : date;
   } catch (e) {
@@ -73,10 +73,12 @@ export function setSpeed(newSpeed) {
 }
 export function getSpeed() { return _speed; }
 
+export function isRunning() { return _interval != null; }
+
 export function subscribe(cb) {
   _subs.add(cb);
   setTimeout(() => {
-    try { cb(_currentMs); } catch (e) {}
+    try { cb(_currentMs); } catch (e) { }
   }, 0);
   return () => _subs.delete(cb);
 }

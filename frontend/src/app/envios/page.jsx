@@ -6,7 +6,8 @@ export const metadata = {
   title: "Envíos | MoraPack",
 };
 
-const URL = "https://1inf54-981-5e.inf.pucp.edu.pe/api/envios/obtenerTodos";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+const URL = `${API_BASE}/api/envios/obtenerTodos`;
 
 export default async function Page() {
   let data = [];
@@ -36,8 +37,8 @@ export default async function Page() {
 
     const origen = e.aeropuertoOrigen
       ? `${e.aeropuertoOrigen.codigo ?? ""} — ${e.aeropuertoOrigen.ciudad ?? ""}`
-      : (Array.isArray(e.aeropuertosOrigen) && e.aeropuertosOrigen.length > 0 ? 
-      `${e.aeropuertosOrigen.length} origen(es)` : "N/D");
+      : (Array.isArray(e.aeropuertosOrigen) && e.aeropuertosOrigen.length > 0 ?
+        `${e.aeropuertosOrigen.length} origen(es)` : "N/D");
 
     const fechaRaw = e.zonedFechaIngreso ?? e.fechaIngreso ?? null;
 

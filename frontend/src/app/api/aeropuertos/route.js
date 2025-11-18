@@ -1,4 +1,4 @@
-const UPSTREAM = "https://1inf54-981-5e.inf.pucp.edu.pe/api/aeropuertos/obtenerTodos";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 let cache = null;
 let cacheTs = 0;
@@ -15,7 +15,7 @@ export async function GET() {
   }
 
   try {
-    const res = await fetch(UPSTREAM);
+    const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`);
     if (!res.ok) {
       if (cache) {
         return new Response(JSON.stringify(cache), {

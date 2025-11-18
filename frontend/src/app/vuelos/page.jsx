@@ -6,7 +6,8 @@ export const metadata = {
   title: "Vuelos | MoraPack",
 };
 
-const URL_PLANES = "https://1inf54-981-5e.inf.pucp.edu.pe/api/planesDeVuelo/obtenerTodos";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+const URL_PLANES = `${API_BASE}/api/planesDeVuelo/obtenerTodos`;
 const URL_AIRPORTS_INTERNAL = (process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000") + "/api/aeropuertos";
 
 function normalizeHora(raw) {
@@ -68,12 +69,12 @@ export default async function Page() {
     const destinoInfo = airportMap[destinoId] ?? {};
 
     const ciudadOrigenDisplay =
-      origenInfo.ciudad && origenInfo.codigo ? 
-      `${origenInfo.ciudad} — ${origenInfo.codigo}` : origenInfo.ciudad || origenInfo.codigo || `ID ${origenId ?? "N/D"}`;
+      origenInfo.ciudad && origenInfo.codigo ?
+        `${origenInfo.ciudad} — ${origenInfo.codigo}` : origenInfo.ciudad || origenInfo.codigo || `ID ${origenId ?? "N/D"}`;
 
     const ciudadDestinoDisplay =
-      destinoInfo.ciudad && destinoInfo.codigo ? 
-      `${destinoInfo.ciudad} — ${destinoInfo.codigo}` : destinoInfo.ciudad || destinoInfo.codigo || `ID ${destinoId ?? "N/D"}`;
+      destinoInfo.ciudad && destinoInfo.codigo ?
+        `${destinoInfo.ciudad} — ${destinoInfo.codigo}` : destinoInfo.ciudad || destinoInfo.codigo || `ID ${destinoId ?? "N/D"}`;
 
     const horaSalidaISO = normalizeHora(p.horaOrigen ?? p.horaOrigenLocal ?? p.hora_salida ?? null);
     const horaLlegadaISO = normalizeHora(p.horaDestino ?? p.horaDestinoLocal ?? p.hora_llegada ?? null);

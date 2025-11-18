@@ -7,11 +7,11 @@ export const metadata = {
 };
 
 export default async function Page() {
-  const url = "https://1inf54-981-5e.inf.pucp.edu.pe/api/aeropuertos/obtenerTodos";
+  const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
   let data = [];
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`);
     if (!res.ok) {
       console.error("Error al obtener aeropuertos:", res.status);
     } else {

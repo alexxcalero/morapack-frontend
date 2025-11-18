@@ -32,27 +32,3 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
-
-.btn-primary {
-  padding: 8px 16px;
-  color: #fff;
-  background-color: #488DF5;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
-  transition: all 0.2s ease-in-out;
-}
-
-.btn-primary:hover {
-  background-color: #357AE8;
-}
-
-.btn-primary:active {
-  transform: scale(0.97);
-}
-
-.btn-primary:focus {
-  outline: 2px solid #90CAF9;
-  outline-offset: 2px;
-}
