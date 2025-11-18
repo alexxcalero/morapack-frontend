@@ -1,175 +1,229 @@
 // src/app/components/Mapa/HoraActual.jsx
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import { initSim, subscribe, getSimMs, parseSpanishDatetime } from "../../../lib/simTime";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { getSimMs, initSim, isRunning, getSpeed, subscribe } from "../../../lib/simTime";
 
-/**
- * parseBackendTime: convierte "2025-01-01 03:34:00Z-5" -> Date (instante UTC correcto)
- * Si la cadena no coincide, intenta Date(t) como fallback.
- */
-function parseBackendTime(s) {
-  if (!s) return null;
-  const t = String(s).trim();
-  // Pattern: YYYY-MM-DD HH:MM:SS Z? offset?
-  const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:Z)?([+\-]?\d+)?$/);
-  if (!m) {
-    const d = new Date(t);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  const [, datePart, timePart, offStr] = m;
-  const off = offStr ? parseInt(offStr, 10) : 0;
-  const [y, mo, day] = datePart.split("-").map(x => parseInt(x, 10));
-  const [hh, mm, ss] = timePart.split(":").map(x => parseInt(x, 10));
-  // Convertir según convención usada anteriormente:
-  const utcMillis = Date.UTC(y, mo - 1, day, hh - off, mm, ss);
-  return new Date(utcMillis);
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+
+function fmtDate(d) {
+  if (!d) return "-";
+  const pad = (n) => String(n).padStart(2, "0");
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const absOffset = Math.abs(offset);
+  const hours = Math.floor(absOffset / 60);
+  const minutes = absOffset % 60;
+  const tz = `UTC${sign}${pad(hours)}:${pad(minutes)}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} (${tz})`;
 }
 
-export default function HoraActual({
-  startStr = null,
-  locale = undefined,
-  showUtc = true,
-  style = {}
-}) {
-  const [statusMsg, setStatusMsg] = useState("");
+function fmtElapsed(ms) {
+  if (ms == null || ms < 0) return "00:00:00";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(ss)}`;
+}
 
-  // ⭐ Nuevos refs para anclar inicios y poder calcular transcurridos
-  const simStartRef = useRef(null);
+export default function HoraActual({ simulacionIniciada = false }) {
+  const [realNow, setRealNow] = useState(() => new Date());
+  const [simNow, setSimNow] = useState(null);
+  const [realElapsed, setRealElapsed] = useState(0);
+  const [simElapsed, setSimElapsed] = useState(0);
+  const [activo, setActivo] = useState(false);
+  const [contadoresActivados, setContadoresActivados] = useState(false);
+
   const realStartRef = useRef(null);
+  const simStartRef = useRef(null);
+  const rafRef = useRef(null);
+  const lastSimMsRef = useRef(null);
+  const contadoresActivadosRef = useRef(false); // ← Ref para acceder en RAF loop
 
-  // ⭐ Reloj de tiempo real
-  const [realNowMs, setRealNowMs] = useState(() => Date.now());
+  // Activar contadores cuando la simulación realmente inicia (después del auto-avance)
   useEffect(() => {
-    const iv = setInterval(() => setRealNowMs(Date.now()), 1000);
-    return () => clearInterval(iv);
+    console.log('🔍 Verificando activación de contadores:', {
+      simulacionIniciada,
+      activo,
+      contadoresActivados
+    });
+
+    if (simulacionIniciada && activo && !contadoresActivados) {
+      const ms = getSimMs();
+      realStartRef.current = Date.now();
+      simStartRef.current = ms;
+      setRealElapsed(0);
+      setSimElapsed(0);
+      setSimNow(new Date(ms)); // Mostrar fecha/hora simulada AHORA
+      setContadoresActivados(true);
+      contadoresActivadosRef.current = true; // ← Actualizar el ref también
+      console.log('✅ Contadores activados - simStart:', ms, new Date(ms).toISOString());
+    }
+  }, [simulacionIniciada, activo]); // ← Quitar contadoresActivados de las dependencias
+
+  // Resetear contadores cuando cambia la simulación
+  useEffect(() => {
+    if (!activo) {
+      setContadoresActivados(false);
+      contadoresActivadosRef.current = false; // ← Resetear el ref también
+    }
+  }, [activo]);
+
+  // Suscribirse a cambios en simTime para detectar reinicios
+  useEffect(() => {
+    const unsub = subscribe((newSimMs) => {
+      // Detectar un salto grande en el tiempo (reinicio de simulación)
+      if (lastSimMsRef.current != null && activo) {
+        const diff = Math.abs(newSimMs - lastSimMsRef.current);
+        // Si hay un salto mayor a 1 hora, es el auto-avance
+        if (diff > 3600000) {
+          console.log('🔄 Reinicio detectado en simTime - Nuevo inicio:', newSimMs, new Date(newSimMs).toISOString());
+
+          // Si no están activados los contadores, activarlos ahora (es el auto-avance inicial)
+          if (!contadoresActivadosRef.current) {
+            realStartRef.current = Date.now();
+            simStartRef.current = newSimMs;
+            setRealElapsed(0);
+            setSimElapsed(0);
+            setSimNow(new Date(newSimMs));
+            setContadoresActivados(true);
+            contadoresActivadosRef.current = true; // ← Actualizar el ref también
+            console.log('✅ Contadores activados por auto-avance - simStart:', newSimMs, new Date(newSimMs).toISOString());
+          } else {
+            // Si ya están activados, solo reiniciar el punto de inicio
+            simStartRef.current = newSimMs;
+            setSimElapsed(0);
+          }
+        }
+      }
+      lastSimMsRef.current = newSimMs;
+    });
+    return unsub;
+  }, [activo]);
+
+  // Poll estado planificador
+  const fetchEstado = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/planificador/estado`);
+      const j = await r.json();
+      const nuevoActivo = !!j?.planificadorActivo;
+
+      setActivo(prev => {
+        if (prev !== nuevoActivo) {
+          if (nuevoActivo) {
+            // inicio simulación - NO inicializar contadores aún, esperar auto-avance
+            const ms = getSimMs();
+            console.log('⏰ Simulación backend iniciada - Esperando auto-avance...');
+            // ✅ CRÍTICO: Asegurar que el ticker de simTime está corriendo
+            if (!isRunning()) {
+              const speed = getSpeed() || 1;
+              initSim({ startMs: ms, stepMs: 1000, speed });
+              console.log('⏰ Ticker de simulación iniciado - speed:', speed);
+            }
+          } else {
+            // Detener: resetear contadores y limpiar simNow
+            setContadoresActivados(false);
+            setSimNow(null);
+          }
+        }
+        return nuevoActivo;
+      });
+    } catch { /* ignorar */ }
   }, []);
 
   useEffect(() => {
-    let mounted = true;
+    fetchEstado();
+    const iv = setInterval(fetchEstado, 5000);
+    return () => clearInterval(iv);
+  }, [fetchEstado]);
 
-    async function decideStart() {
-      try {
-        // 1) Si startStr se pasó explícito -> usarlo (2h antes)
-        if (startStr) {
-          const parsed = parseSpanishDatetime(startStr);
-          const startMs = parsed ? parsed.getTime() : Date.now();
-          initSim({ startMs, stepMs: 1000, speed: 1 });
-          // ⭐ Anclar inicios
-          simStartRef.current = startMs;
-          realStartRef.current = Date.now();
-          if (mounted) setStatusMsg(`Sim. iniciada: ${new Date(startMs).toLocaleString()}`);
-          return;
+  // Reloj real suave
+  useEffect(() => {
+    const tick = () => {
+      const nowRealMs = Date.now();
+      // actualizar real cada frame (suave)
+      setRealNow(new Date(nowRealMs));
+
+      // Mostrar hora simulada SOLO si los contadores están activados
+      const simMs = getSimMs();
+      if (contadoresActivadosRef.current) { // ← Usar el ref en lugar del estado
+        setSimNow(new Date(simMs));
+
+        // Calcular transcurrido sim
+        if (simStartRef.current != null) {
+          const elapsed = simMs - simStartRef.current;
+          setSimElapsed(elapsed);
+          // Log para debug cada 5 segundos
+          if (Math.floor(nowRealMs / 5000) !== Math.floor((nowRealMs - 16) / 5000)) {
+            console.log('⏱️ simMs:', simMs, 'simStart:', simStartRef.current, 'elapsed:', elapsed, 'formatted:', fmtElapsed(elapsed));
+          }
         }
 
-        // 2) startStr no proporcionado -> iniciar 2h antes de ahora
-        const fallback = Date.now() - 2 * 60 * 60 * 1000;
-        initSim({ startMs: fallback, stepMs: 1000, speed: 1 });
-        // ⭐ Anclar inicios
-        simStartRef.current = fallback;
-        realStartRef.current = Date.now();
-        if (mounted) setStatusMsg("Sim. iniciada (ahora -2h)");
-      } catch (err) {
-        console.error("HoraActual decideStart error:", err);
+        // El transcurrido real solo avanza cuando activo y contadores activados
+        if (realStartRef.current != null) {
+          setRealElapsed(nowRealMs - realStartRef.current);
+        }
       }
-    }
 
-    decideStart();
-    return () => { mounted = false; };
-    // startStr es dependencia por si quieres forzar cambio
-  }, [startStr]);
+      rafRef.current = requestAnimationFrame(tick);
+    };
 
-  // Suscripción al tiempo de simulación
-  const [nowMs, setNowMs] = useState(() => getSimMs());
-  useEffect(() => {
-    const unsub = subscribe((ms) => {
-      setNowMs(ms);
-      // ⭐ Si no tenemos anclado inicio simulado (por ejemplo, si otro componente llamó initSim)
-      if (simStartRef.current == null) simStartRef.current = ms;
-      if (realStartRef.current == null) realStartRef.current = Date.now();
-    });
-    return () => unsub();
-  }, []);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []); // ← Sin dependencias, solo se ejecuta una vez
 
-  // Formateadores
-  const localeToUse = locale || (typeof navigator !== "undefined" ? navigator.language : "es-PE");
-  const now = new Date(nowMs);
-  const realNow = new Date(realNowMs);
-
-  const dateStr = now.toLocaleDateString(localeToUse, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
-  const timeStr = now.toLocaleTimeString(localeToUse, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const realDateStr = realNow.toLocaleDateString(localeToUse, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
-  const realTimeStr = realNow.toLocaleTimeString(localeToUse, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-  const tzOffsetMin = -now.getTimezoneOffset();
-  const tzSign = tzOffsetMin >= 0 ? "+" : "-";
-  const tzHours = Math.floor(Math.abs(tzOffsetMin) / 60);
-  const tzMins = Math.abs(tzOffsetMin) % 60;
-  const tzStr = `UTC${tzSign}${String(tzHours).padStart(2, "0")}:${String(tzMins).padStart(2, "0")}`;
-  const utcStr = new Date(now.getTime() + now.getTimezoneOffset() * 60000).toISOString().replace("T", " ").split(".")[0];
-
-  // ⭐ Formatear duración (DD d HH:MM:SS)
-  function formatDuration(ms) {
-    let s = Math.max(0, Math.floor(ms / 1000));
-    const d = Math.floor(s / 86400); s -= d * 86400;
-    const h = Math.floor(s / 3600); s -= h * 3600;
-    const m = Math.floor(s / 60); const sec = s - m * 60;
-    return `${String(d).padStart(2, "0")}d ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-  }
-
-  const simElapsedStr = simStartRef.current != null ? formatDuration(nowMs - simStartRef.current) : "—";
-  const realElapsedStr = realStartRef.current != null ? formatDuration(realNowMs - realStartRef.current) : "—";
-
-  const baseStyle = {
-    position: "relative",
-    right: 0,
-    top: 0,
-    zIndex: 1200,
+  const box = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
     background: "rgba(255,255,255,0.95)",
-    borderRadius: 8,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-    padding: "8px 12px",
-    minWidth: 260,
-    fontFamily: "Inter, Roboto, Arial, sans-serif",
-    fontSize: 13,
-    color: "#111",
-    ...style,
+    padding: "12px 16px",
+    borderRadius: 14,
+    boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+    fontFamily: "system-ui,sans-serif",
+    minWidth: 270
   };
+  const label = { fontSize: 11, fontWeight: 600, letterSpacing: ".5px", color: "#64748b", textTransform: "uppercase" };
+  const val = { fontSize: 14, fontWeight: 600, color: "#0f172a", fontVariantNumeric: "tabular-nums" };
+  const elapsedStyle = active => ({
+    fontSize: 13, fontWeight: 600,
+    color: active ? "#0f172a" : "#64748b",
+    fontVariantNumeric: "tabular-nums"
+  });
 
   return (
-    <div style={baseStyle} aria-live="polite" role="status">
-      {/* Momento SIMULADO (fecha y hora con segundos) */}
-      <div style={{ fontWeight: 700, color: "#0f172a" }}>Simulación</div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <div>{dateStr}</div>
-        <div style={{ fontVariantNumeric: "tabular-nums" }}>{timeStr}</div>
+    <div style={box}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={label}>Fecha / Hora real</span>
+        <span style={val}>{fmtDate(realNow)}</span>
       </div>
-
-      {/* Momento ACTUAL (tiempo real) */}
-      <div style={{ marginTop: 6, fontWeight: 700, color: "#0f172a" }}>Tiempo real</div>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-        <div>{realDateStr}</div>
-        <div style={{ fontVariantNumeric: "tabular-nums" }}>{realTimeStr}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={label}>Fecha / Hora simulada</span>
+        <span style={val}>{simNow ? fmtDate(simNow) : "-"}</span>
       </div>
-
-      {/* Transcurridos */}
-      <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid #e5e7eb" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ opacity: 0.8 }}>Transcurrido sim.</div>
-          <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{simElapsedStr}</div>
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={label}>Transcurrido real</span>
+          <span style={elapsedStyle(activo)}>
+            {fmtElapsed(realElapsed)} {!activo && realElapsed > 0 && "(pausado)"}
+          </span>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
-          <div style={{ opacity: 0.8 }}>Transcurrido real</div>
-          <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{realElapsedStr}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={label}>Transcurrido sim.</span>
+          <span style={elapsedStyle(activo)}>
+            {fmtElapsed(simElapsed)} {!activo && simElapsed > 0 && "(pausado)"}
+          </span>
         </div>
       </div>
-
-      {/* Zona UTC / estado (opcional) */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, opacity: 0.85 }}>
-        <div>{tzStr}</div>
-        {showUtc ? <div style={{ opacity: 0.9 }}>UTC: {utcStr}</div> : null}
+      <div style={{ fontSize: 10, color: "#94a3b8", textAlign: "right" }}>
+        Estado: {activo ? "En ejecución" : "Detenido"}
       </div>
-      {statusMsg ? <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>{statusMsg}</div> : null}
     </div>
   );
 }

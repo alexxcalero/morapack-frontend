@@ -7,16 +7,31 @@ const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.i
 
 export default function SimulationControls({ startStr = null }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
+    const [iniciando, setIniciando] = useState(false); // ← estado separado para iniciar sin bloquear UI
     const [fechaInicio, setFechaInicio] = useState(""); // ← fecha inicio editable
 
     // ✅ Calcular fecha fin automáticamente (+7 días)
     const fechaFin = useMemo(() => {
         if (!fechaInicio) return "";
         try {
-            const fecha = new Date(fechaInicio);
+            // Parsear la fecha como hora local, no UTC
+            const [datePart, timePart] = fechaInicio.split('T');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute] = (timePart || '00:00').split(':').map(Number);
+
+            const fecha = new Date(year, month - 1, day, hour, minute);
             if (isNaN(fecha.getTime())) return "";
+
             fecha.setDate(fecha.getDate() + 7);
-            return fecha.toISOString().slice(0, 16); // formato "YYYY-MM-DDTHH:mm"
+
+            // Formatear de vuelta a datetime-local
+            const y = fecha.getFullYear();
+            const m = String(fecha.getMonth() + 1).padStart(2, '0');
+            const d = String(fecha.getDate()).padStart(2, '0');
+            const h = String(fecha.getHours()).padStart(2, '0');
+            const min = String(fecha.getMinutes()).padStart(2, '0');
+
+            return `${y}-${m}-${d}T${h}:${min}`;
         } catch {
             return "";
         }
@@ -41,12 +56,70 @@ export default function SimulationControls({ startStr = null }) {
         return () => clearInterval(iv);
     }, []);
 
-    const iniciar = async () => {
+    const limpiar = async () => {
+        if (estado.activo) {
+            alert("Detén la simulación antes de limpiar.");
+            return;
+        }
         setEstado(s => ({ ...s, cargando: true }));
         try {
-            await fetch(`${API_BASE}/api/planificador/iniciar`, { method: "POST" });
+            const res = await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
+            if (res.ok) alert("✅ Simulación limpiada correctamente.");
+            else alert("❌ Error al limpiar simulación.");
+        } catch (err) {
+            console.error("Error limpiar:", err);
+            alert("❌ Error de conexión.");
         } finally {
             fetchEstado();
+        }
+    };
+
+    const iniciar = async () => {
+        if (!fechaInicio) {
+            alert("Por favor ingresa una fecha de inicio.");
+            return;
+        }
+        setIniciando(true); // ← no bloquea la UI global, solo el botón
+        try {
+            // Primero limpiar la simulación anterior
+            await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
+
+            // Parsear fecha como hora local
+            const [datePart, timePart] = fechaInicio.split('T');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute] = (timePart || '00:00').split(':').map(Number);
+
+            const inicio = new Date(year, month - 1, day, hour, minute);
+            const fin = new Date(inicio);
+            fin.setDate(fin.getDate() + 7);
+
+            // Formatear para el backend en formato ISO con T (YYYY-MM-DDTHH:mm:ss)
+            const formatoBackend = (d) => {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const h = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                const sec = String(d.getSeconds()).padStart(2, '0');
+                return `${y}-${m}-${day}T${h}:${min}:${sec}`;
+            };
+
+            const body = {
+                fechaInicio: formatoBackend(inicio),
+                fechaFin: formatoBackend(fin)
+            };
+
+            await fetch(`${API_BASE}/api/planificador/iniciar-simulacion-semanal`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+
+            // Actualizar estado inmediatamente sin esperar el polling
+            setEstado({ activo: true, cargando: false });
+        } finally {
+            setIniciando(false);
+            // fetchEstado se ejecutará en el próximo ciclo del polling
         }
     };
 
@@ -127,16 +200,17 @@ export default function SimulationControls({ startStr = null }) {
             <button
                 type="button"
                 onClick={iniciar}
-                disabled={estado.cargando || estado.activo}
+                disabled={iniciando || estado.activo || !fechaInicio}
                 style={{
                     ...btnStyle,
                     border: "none",
-                    background: estado.activo ? "#94a3b8" : "#3b82f6",
+                    background: estado.activo || !fechaInicio || iniciando ? "#94a3b8" : "#3b82f6",
                     color: "white",
+                    cursor: estado.activo || !fechaInicio || iniciando ? "not-allowed" : "pointer",
                 }}
-                title={estado.activo ? "Ya está iniciado" : "Iniciar planificador"}
+                title={estado.activo ? "Simulación en ejecución - Detén primero para reiniciar" : !fechaInicio ? "Ingresa fecha de inicio" : "Iniciar planificador"}
             >
-                {estado.cargando ? "..." : "Iniciar"}
+                {iniciando ? "Iniciando..." : estado.activo ? "En ejecución" : "Iniciar"}
             </button>
 
             <button

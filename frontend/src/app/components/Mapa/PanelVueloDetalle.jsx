@@ -9,9 +9,20 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
     useEffect(() => { const u = subscribe(ms => setNowMs(ms)); return () => u(); }, []);
     if (!vuelo) return null;
 
-    const enviosAsignados = Array.isArray(vuelo.raw?.enviosAsignados) ? vuelo.raw.enviosAsignados : [];
+    // Usar historial completo si los envíos actuales están vacíos pero hubo envíos antes
+    let enviosAsignados = Array.isArray(vuelo.raw?.enviosAsignados) && vuelo.raw.enviosAsignados.length > 0
+        ? vuelo.raw.enviosAsignados
+        : (Array.isArray(vuelo.raw?.__historialEnviosCompletos) && vuelo.raw.__historialEnviosCompletos.length > 0
+            ? vuelo.raw.__historialEnviosCompletos
+            : []);
+
     const capacidadMax = vuelo.raw?.capacidadMaxima ?? 300;
-    const capacidadOcupada = vuelo.raw?.capacidadOcupada ?? 0;
+    // Calcular capacidad ocupada usando historial si no hay envíos actuales
+    let capacidadOcupada = Array.isArray(vuelo.raw?.enviosAsignados) && vuelo.raw.enviosAsignados.length > 0
+        ? vuelo.raw.enviosAsignados.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
+        : (Array.isArray(vuelo.raw?.__historialEnviosCompletos) && vuelo.raw.__historialEnviosCompletos.length > 0
+            ? vuelo.raw.__historialEnviosCompletos.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
+            : 0);
     const capacidadPct = capacidadMax > 0 ? Math.round((capacidadOcupada / capacidadMax) * 100) : 0;
     const progreso = Math.max(0, Math.min(100, ((vuelo.pos?.progreso ?? 0) * 100)));
 
