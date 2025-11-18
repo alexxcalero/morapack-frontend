@@ -432,7 +432,19 @@ export default function Mapa() {
 
     loadUltimoCiclo();
     const iv = setInterval(loadUltimoCiclo, 30_000);
-    return () => { mounted = false; cancelled = true; clearInterval(iv); };
+    // Escuchar inicio explícito del planificador para refrescar inmediatamente
+    const onPlanificadorIniciado = () => {
+      // Refresco inmediato y un par de reintentos rápidos para capturar datos recientes
+      loadUltimoCiclo();
+      setTimeout(loadUltimoCiclo, 1500);
+      setTimeout(loadUltimoCiclo, 3500);
+    };
+    try { window.addEventListener('planificador:iniciado', onPlanificadorIniciado); } catch { }
+
+    return () => {
+      mounted = false; cancelled = true; clearInterval(iv);
+      try { window.removeEventListener('planificador:iniciado', onPlanificadorIniciado); } catch { }
+    };
   }, []);
 
   // ⏱ La hora simulada es la principal: no forzar ajustes de rango.

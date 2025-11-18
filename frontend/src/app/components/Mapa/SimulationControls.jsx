@@ -90,6 +90,11 @@ export default function SimulationControls({ startStr = null }) {
             const [hour, minute] = (timePart || '00:00').split(':').map(Number);
 
             const inicio = new Date(year, month - 1, day, hour, minute);
+            // Compensar la diferencia horaria (-05:00) agregando 5 horas para que
+            // la "Fecha / Hora simulada" coincida con la ingresada por el usuario.
+            // El usuario ingresa hora local, pero el motor interno interpreta en UTC.
+            // Ajustamos aquí para alinear la visualización posterior.
+            inicio.setHours(inicio.getHours() + 5);
             const fin = new Date(inicio);
             fin.setDate(fin.getDate() + 7);
 
@@ -114,6 +119,9 @@ export default function SimulationControls({ startStr = null }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body)
             });
+
+            // Notificar al mapa para que refresque inmediatamente los vuelos (evitar esperar el polling)
+            try { window.dispatchEvent(new Event('planificador:iniciado')); } catch { }
 
             // Actualizar estado inmediatamente sin esperar el polling
             setEstado({ activo: true, cargando: false });
