@@ -1,4 +1,4 @@
-import MapaClient from "../components/Mapa/MapaClient";
+import MapaSimDiaClient from "../components/MapaSimDia/MapaSimDiaClient";
 
 export const metadata = {
   title: "Simulación Dia a Dia | MoraPack",
@@ -7,7 +7,7 @@ export const metadata = {
 export default function SimulacionDia() {
   return (
     <main>
-      <MapaClient />
+      <MapaSimDiaClient />
     </main>
   );
 }

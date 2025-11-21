@@ -32,3 +32,245 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+.btn-primary {
+  padding: 8px 16px;
+  color: #fff;
+  background-color: #488DF5;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-primary:hover {
+  background-color: #357AE8;
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-primary:focus {
+  outline: 2px solid #90CAF9;
+  outline-offset: 2px;
+}
+
+.btn-green,
+.btn-red {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease-in-out;
+  font-weight: 500;
+}
+
+.btn-green {
+  background-color: #22c55e;
+}
+
+.btn-green:hover {
+  background-color: #1ea153;
+}
+
+.btn-green:focus {
+  outline: 2px solid #a7f3d0;
+  outline-offset: 2px;
+}
+
+.btn-outline,
+.btn-accent {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.btn-outline {
+  background: transparent;
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.3);
+}
+
+.btn-outline:hover {
+  border-color: rgba(15, 23, 42, 0.5);
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.btn-outline:focus {
+  outline: 2px solid rgba(148, 163, 184, 0.6);
+  outline-offset: 2px;
+}
+
+.btn-accent {
+  background: linear-gradient(120deg, #2563eb, #7c3aed);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(99, 102, 241, 0.35);
+}
+
+.btn-accent:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(99, 102, 241, 0.4);
+}
+
+.btn-accent:focus {
+  outline: 2px solid rgba(129, 140, 248, 0.6);
+  outline-offset: 2px;
+}
+
+.btn-red {
+  background-color: #ef4444;
+}
+
+.btn-red:hover {
+  background-color: #dc2626;
+}
+
+.btn-red:focus {
+  outline: 2px solid #fecaca;
+  outline-offset: 2px;
+}
+
+.resumen-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 11, 40, 0.65);
+  backdrop-filter: blur(6px);
+  z-index: 2100;
+}
+
+.resumen-card {
+  position: relative;
+  width: min(420px, 92vw);
+  padding: 32px 28px 28px;
+  border-radius: 28px;
+  background: linear-gradient(160deg, #0983fe 0%, #5d8bff 50%, #08a0fe 100%);
+  box-shadow: 0 25px 70px rgba(15, 23, 42, 0.45);
+  color: #fff;
+  animation: resumen-pop 0.3s ease-out;
+}
+
+.resumen-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.resumen-close:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.resumen-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.resumen-heading__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.resumen-heading p {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.resumen-heading span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.resumen-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.resumen-stat {
+  padding: 16px 18px;
+  border-radius: 18px;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 40px rgba(255, 255, 255, 0.05);
+}
+
+.resumen-stat__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.resumen-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.9rem;
+  line-height: 1.1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.resumen-action {
+  margin-top: 24px;
+  width: 100%;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #131124;
+  background: #ffffff;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.resumen-action:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 25px rgba(15, 23, 42, 0.25);
+}
+
+@keyframes resumen-pop {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
