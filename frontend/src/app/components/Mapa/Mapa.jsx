@@ -14,6 +14,8 @@ import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
 import ResumenSimulacion from "./ResumenSimulacion";
+import useWebSocket from "../../../lib/useWebSocket";
+import { obtenerRutasEnvio } from "../../../lib/envios";
 
 // URL base del backend (misma usada en SimulationControls)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
@@ -263,6 +265,7 @@ export default function Mapa() {
   const mapRef = useRef(null);
   const [rawAirports, setRawAirports] = useState(null);
   const [dynamicAirports, setDynamicAirports] = useState(null); // ← aeropuertos desde /vuelos-ultimo-ciclo
+  const [localAirportCapacities, setLocalAirportCapacities] = useState({}); // ← capacidades locales calculadas
   const [rawVuelos, setRawVuelos] = useState(null);
   const [vuelosCache, setVuelosCache] = useState([]); // ← NUEVO: caché local de vuelos
   const [panelAbierto, setPanelAbierto] = useState(false);
@@ -274,6 +277,9 @@ export default function Mapa() {
   const [soloConEnvios, setSoloConEnvios] = useState(false); // ← filtro de vuelos con envíos
   const [flyTarget, setFlyTarget] = useState(null);
   const [navegando, setNavegando] = useState(false);
+
+  // Estados para visualizar rutas de envíos
+  const [rutasEnvioSeleccionado, setRutasEnvioSeleccionado] = useState(null);
 
   // Estados para el resumen de simulación
   const [mostrarResumen, setMostrarResumen] = useState(false);
@@ -294,6 +300,91 @@ export default function Mapa() {
     const unsub = subscribe(ms => setNowMs(ms));
     return () => unsub();
   }, []);
+
+  // 🔌 WebSocket: Actualizaciones en tiempo real del planificador (manteniendo polling como fallback)
+  const { connected: wsConnected, error: wsError } = useWebSocket({
+    topic: '/topic/planificacion',
+    enabled: true,
+    onMessage: useCallback((message) => {
+      if (message?.tipo === 'update_ciclo') {
+        // Refrescar de inmediato los datos del último ciclo
+        (async () => {
+          try {
+            const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
+            if (!res.ok) return;
+            const data = await res.json();
+            setHorizonte(data?.horizonte || null);
+            const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
+            if (Array.isArray(data?.aeropuertos)) {
+              setDynamicAirports(data.aeropuertos);
+              // Aplicar solo DECREMENTOS del planificador (envíos entregados)
+              setLocalAirportCapacities(prevLocal => {
+                const newLocal = { ...prevLocal };
+                data.aeropuertos.forEach(aeropuerto => {
+                  const id = aeropuerto.id ?? aeropuerto.idAeropuerto;
+                  if (id != null) {
+                    const capacidadPlanificador = aeropuerto.capacidadOcupada ?? 0;
+                    const capacidadActual = prevLocal[id] ?? capacidadPlanificador;
+                    // Solo aplicar si el planificador reporta MENOS capacidad (entrega)
+                    if (capacidadPlanificador < capacidadActual) {
+                      newLocal[id] = capacidadPlanificador;
+                    }
+                    // Si no existe en prevLocal, inicializar con valor del planificador
+                    if (!(id in prevLocal)) {
+                      newLocal[id] = capacidadPlanificador;
+                    }
+                  }
+                });
+                return newLocal;
+              });
+            }
+            setVuelosCache(prev => {
+              const ahoraSimulacion = getSimMs();
+              const margenSeguridad = 5 * 60 * 1000;
+              const vuelosVigentes = prev.filter(v => {
+                const llegada = parsePlanificadorTime(v.horaLlegada);
+                return llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
+              });
+              const idsNuevos = new Set(vuelosNuevos.map(v => v.id));
+              const vuelosAntiguos = vuelosVigentes.filter(v => !idsNuevos.has(v.id));
+              const historialEnvios = {};
+              for (const v of prev) {
+                if (Array.isArray(v.__historialEnviosCompletos)) historialEnvios[v.id] = [...v.__historialEnviosCompletos];
+                else if (Array.isArray(v.enviosAsignados) && v.enviosAsignados.length > 0) historialEnvios[v.id] = [...v.enviosAsignados];
+              }
+              const vuelosNuevosMarcados = vuelosNuevos.map(v => {
+                let __tuvoEnvios = false;
+                let __historialEnviosCompletos = historialEnvios[v.id] || [];
+                let __historialEnviosIds = new Set(__historialEnviosCompletos.map(e => e.envioId ?? e.id ?? e.envio_id));
+                if (Array.isArray(v.enviosAsignados) && v.enviosAsignados.length > 0) {
+                  __tuvoEnvios = true;
+                  for (const e of v.enviosAsignados) {
+                    const eId = e.envioId ?? e.id ?? e.envio_id;
+                    if (!__historialEnviosIds.has(eId)) {
+                      __historialEnviosCompletos.push(e);
+                      __historialEnviosIds.add(eId);
+                    }
+                  }
+                } else if (__historialEnviosCompletos.length > 0) {
+                  __tuvoEnvios = true;
+                }
+                return { ...v, __tuvoEnvios, __historialEnvios: Array.from(__historialEnviosIds), __historialEnviosCompletos };
+              });
+              return [...vuelosNuevosMarcados, ...vuelosAntiguos];
+            });
+            setRawVuelos(vuelosNuevos);
+          } catch (e) {
+            console.error('WS refresh error:', e);
+          }
+        })();
+      }
+    }, [])
+  });
+
+  useEffect(() => {
+    if (wsConnected) console.log('🟢 WebSocket conectado');
+    if (wsError) console.log('🔴 WebSocket error:', wsError, '- fallback polling activo');
+  }, [wsConnected, wsError]);
 
   // cargar aeropuertos (unchanged)
   useEffect(() => {
@@ -346,6 +437,26 @@ export default function Mapa() {
         // ✅ NUEVO: Actualizar aeropuertos dinámicos con capacidades desde backend
         if (Array.isArray(data?.aeropuertos)) {
           setDynamicAirports(data.aeropuertos);
+          // Aplicar solo DECREMENTOS del planificador (envíos entregados)
+          setLocalAirportCapacities(prevLocal => {
+            const newLocal = { ...prevLocal };
+            data.aeropuertos.forEach(aeropuerto => {
+              const id = aeropuerto.id ?? aeropuerto.idAeropuerto;
+              if (id != null) {
+                const capacidadPlanificador = aeropuerto.capacidadOcupada ?? 0;
+                const capacidadActual = prevLocal[id] ?? capacidadPlanificador;
+                // Solo aplicar si el planificador reporta MENOS capacidad (entrega)
+                if (capacidadPlanificador < capacidadActual) {
+                  newLocal[id] = capacidadPlanificador;
+                }
+                // Si no existe en prevLocal, inicializar con valor del planificador
+                if (!(id in prevLocal)) {
+                  newLocal[id] = capacidadPlanificador;
+                }
+              }
+            });
+            return newLocal;
+          });
         }
 
         // ✅ FUSIONAR: Preservar vuelos del cache que aún están volando
@@ -504,6 +615,12 @@ export default function Mapa() {
             console.warn('⚠️ Error al detener simulación:', detenerRes.status);
           }
 
+          // Limpiar caché de vuelos al detener
+          setVuelosCache([]);
+          setRawVuelos([]);
+          setLocalAirportCapacities({}); // Resetear capacidades locales
+          console.log('🧹 Caché de vuelos y capacidades limpiado al finalizar simulación');
+
           // Obtener estadísticas de envíos desde el backend
           const enviosRes = await fetch(`${API_BASE}/api/envios/obtenerTodos`);
           if (enviosRes.ok) {
@@ -560,6 +677,12 @@ export default function Mapa() {
       fechaInicioSimRef.current = null;
       fechaFinSimRef.current = null;
       setMostrarResumen(false);
+    } else {
+      // Si la simulación se detiene (manualmente o por error), limpiar caché y capacidades
+      setVuelosCache([]);
+      setRawVuelos([]);
+      setLocalAirportCapacities({}); // Resetear capacidades locales
+      console.log('🧹 Caché de vuelos y capacidades limpiado al detener simulación');
     }
   }, [horizonte?.inicio]); // Cuando cambia el horizonte, es una nueva simulación
 
@@ -583,14 +706,13 @@ export default function Mapa() {
   const airportsBase = useMemo(() => {
     if (!Array.isArray(rawAirports)) return [];
 
-    // Crear mapa de capacidades dinámicas desde backend
+    // Crear mapa de capacidades dinámicas desde backend (para capacidadMaxima)
     const dynamicMap = {};
     if (Array.isArray(dynamicAirports)) {
       dynamicAirports.forEach(a => {
         const id = a.id ?? a.idAeropuerto;
         if (id != null) {
           dynamicMap[id] = {
-            capacidadOcupada: a.capacidadOcupada ?? 0,
             capacidadMaxima: a.capacidadMaxima ?? a.capacidad ?? null
           };
         }
@@ -601,11 +723,11 @@ export default function Mapa() {
       const lat = parseCoord(a.latitud ?? a.lat ?? a.latitude, { isLat: true, airport: a });
       const lon = parseCoord(a.longitud ?? a.lon ?? a.longitude, { isLat: false, airport: a });
 
-      // Usar capacidades dinámicas del backend si existen, sino usar estáticas
+      // Usar capacidades locales calculadas (incrementadas con aterrizajes)
       const dynamic = dynamicMap[a.id] || {};
       const ilimitado = esAeropuertoPrincipal(a);
       const capacidadMaxima = ilimitado ? null : (dynamic.capacidadMaxima ?? a.capacidadMaxima ?? a.capacidad ?? null);
-      const capacidadOcupada = ilimitado ? 0 : (dynamic.capacidadOcupada ?? a.capacidadOcupada ?? 0);
+      const capacidadOcupada = ilimitado ? 0 : (localAirportCapacities[a.id] ?? a.capacidadOcupada ?? 0);
 
       return {
         id: a.id,
@@ -620,9 +742,7 @@ export default function Mapa() {
         raw: a
       };
     }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon));
-  }, [rawAirports, dynamicAirports, esAeropuertoPrincipal]);
-
-  const airportsById = useMemo(() => {
+  }, [rawAirports, dynamicAirports, localAirportCapacities, esAeropuertoPrincipal]); const airportsById = useMemo(() => {
     const map = {};
     for (const a of airportsBase) map[a.id] = a;
     return map;
@@ -755,6 +875,46 @@ export default function Mapa() {
   const vuelosConEnvios = useMemo(() => {
     return vuelosFiltrados.filter(v => v.tieneEnvios);
   }, [vuelosFiltrados]); // ← ya depende de vuelosFiltrados que incluye nowMs
+
+  // 🛬 Detectar aterrizajes e incrementar capacidades de aeropuertos
+  const vuelosAterrizadosRef = useRef(new Set()); // Trackear vuelos ya procesados
+
+  useEffect(() => {
+    const ahoraMs = throttledNowMs;
+
+    vuelos.forEach(vuelo => {
+      if (!vuelo.horaDestino || !vuelo.ciudadDestinoId) return;
+
+      const vueloId = vuelo.idTramo;
+      const llegadaMs = vuelo.horaDestino.getTime();
+
+      // Si el avión ya llegó y no lo hemos procesado
+      if (ahoraMs >= llegadaMs && !vuelosAterrizadosRef.current.has(vueloId)) {
+        vuelosAterrizadosRef.current.add(vueloId);
+
+        // Incrementar capacidad del aeropuerto destino con la carga del avión
+        const capacidadCarga = vuelo.raw?.capacidadOcupada || 0;
+
+        if (capacidadCarga > 0) {
+          setLocalAirportCapacities(prev => {
+            const aeropuertoId = vuelo.ciudadDestinoId;
+            const capacidadActual = prev[aeropuertoId] || 0;
+            return {
+              ...prev,
+              [aeropuertoId]: capacidadActual + capacidadCarga
+            };
+          });
+
+          console.log(`🛬 Avión ${vueloId} aterrizó en aeropuerto ${vuelo.ciudadDestinoId} con ${capacidadCarga} productos`);
+        }
+      }
+    });
+  }, [vuelos, throttledNowMs]);
+
+  // Limpiar tracking de aterrizajes cuando cambia el horizonte o se detiene simulación
+  useEffect(() => {
+    vuelosAterrizadosRef.current.clear();
+  }, [horizonte?.inicio]);
 
   // ✅ Auto-avance: SOLO se ejecuta una vez al inicio cuando no hay vuelos en el aire
   // ⚠️ NO debe depender del filtro soloConEnvios ni de vuelosFiltrados
@@ -981,6 +1141,41 @@ export default function Mapa() {
     console.warn("No se pudo localizar el vuelo para el envío", envioObj);
   }, [vuelos, vuelosCache, handleSelectVuelo]);
 
+  // 🆕 Callback para seleccionar ruta de envío completo
+  const handleSelectRutaEnvio = useCallback(async (envio) => {
+    console.log('📦 Ruta de envío seleccionada:', envio);
+
+    try {
+      // Cerrar otros paneles
+      setVueloSeleccionado(null);
+      setVueloDetalleCompleto(null);
+      setAeropuertoDetalle(null);
+      setAeropuertoSeleccionado(null);
+
+      // Obtener rutas completas del envío
+      const rutasCompletas = await obtenerRutasEnvio(envio.id);
+
+      if (!rutasCompletas || !rutasCompletas.rutas || rutasCompletas.rutas.length === 0) {
+        console.warn('No se encontraron rutas para el envío', envio.id);
+        return;
+      }
+
+      console.log('🗺️ Rutas obtenidas:', rutasCompletas);
+      setRutasEnvioSeleccionado(rutasCompletas);
+
+      // Hacer zoom al primer aeropuerto origen
+      if (rutasCompletas.aeropuertoOrigen) {
+        const lat = rutasCompletas.aeropuertoOrigen.latitud;
+        const lon = rutasCompletas.aeropuertoOrigen.longitud;
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          setFlyTarget({ lat, lon, zoom: 6 });
+        }
+      }
+    } catch (error) {
+      console.error('Error al obtener rutas del envío:', error);
+    }
+  }, []);
+
   // ⭐ Eliminar rutasDinamicas anteriores y usar una sola ruta para vuelo seleccionado
   // const rutasDinamicas = useMemo(() => { ... });  // ← eliminado
 
@@ -1187,6 +1382,7 @@ export default function Mapa() {
         onSelectVuelo={handleSelectVueloPanel}
         onSelectEnvio={handleSelectEnvio}
         onSelectAeropuerto={(a) => handleSelectAeropuerto(a, true)}
+        onSelectRutaEnvio={handleSelectRutaEnvio}
         aeropuertos={airports}
         vuelosCache={vuelosCache}
         envios={enviosEnCirculacion}
@@ -1244,6 +1440,42 @@ export default function Mapa() {
           updateWhenIdle={true}
           keepBuffer={2}
         />
+
+        {/* 📦 Rutas de envío completas (todas las partes y sus vuelos) */}
+        {rutasEnvioSeleccionado && rutasEnvioSeleccionado.rutas && rutasEnvioSeleccionado.rutas.map((ruta, rutaIdx) => {
+          // Colores diferenciados por parte
+          const coloresPorParte = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
+          const colorRuta = coloresPorParte[rutaIdx % coloresPorParte.length];
+
+          return ruta.vuelos.map((vuelo, vueloIdx) => {
+            // Encontrar aeropuertos origen y destino
+            const origenAirport = airportsById[vuelo.ciudadOrigen];
+            const destinoAirport = airportsById[vuelo.ciudadDestino];
+
+            if (!origenAirport || !destinoAirport) return null;
+
+            const positions = greatCirclePoints(
+              origenAirport.lat,
+              origenAirport.lon,
+              destinoAirport.lat,
+              destinoAirport.lon,
+              64
+            );
+
+            return (
+              <Polyline
+                key={`envio-ruta-${rutasEnvioSeleccionado.envioId}-parte-${rutaIdx}-vuelo-${vueloIdx}`}
+                positions={positions}
+                pathOptions={{
+                  color: colorRuta,
+                  weight: 3,
+                  opacity: 0.7,
+                  dashArray: '10,10',
+                }}
+              />
+            );
+          });
+        })}
 
         {airports.map(a => {
           const isSelected = aeropuertoSeleccionado === a.id;

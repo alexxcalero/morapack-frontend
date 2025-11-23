@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
-import { X, Package, Plane, MapPin } from 'lucide-react';
+import { X, Package, Plane, MapPin, Search, Route } from 'lucide-react';
 import { subscribe, getSimMs } from '../../../lib/simTime';
+import { obtenerEnviosPendientes } from '../../../lib/envios';
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
@@ -239,12 +240,78 @@ const EnvioItem = memo(({ envio, onSelect }) => {
 
 EnvioItem.displayName = 'EnvioItem';
 
+// Componente para envío pendiente (con rutas completas)
+const EnvioPendienteItem = memo(({ envio, onSelect }) => {
+    const origenNombre = envio.aeropuertoOrigen?.ciudad
+        ? `${envio.aeropuertoOrigen.ciudad} (${envio.aeropuertoOrigen.codigo || ''})`
+        : 'Origen desconocido';
+
+    const destinoNombre = envio.aeropuertoDestino?.ciudad
+        ? `${envio.aeropuertoDestino.ciudad} (${envio.aeropuertoDestino.codigo || ''})`
+        : 'Destino desconocido';
+
+    return (
+        <div
+            onClick={() => onSelect(envio)}
+            style={{
+                padding: '12px',
+                borderBottom: '1px solid #e5e7eb',
+                background: '#fafafa',
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'background 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
+            onMouseLeave={(e) => e.currentTarget.style.background = '#fafafa'}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Route size={16} color="#1976d2" />
+                <span style={{ fontWeight: 700, color: '#1976d2', fontSize: 14 }}>
+                    Envío #{envio.id}
+                </span>
+                {envio.idEnvioPorAeropuerto && (
+                    <span style={{ fontSize: 11, color: '#6b7280' }}>
+                        (#{envio.idEnvioPorAeropuerto})
+                    </span>
+                )}
+            </div>
+
+            <div style={{ fontSize: 13, marginBottom: 6, fontWeight: 500 }}>
+                <span style={{ color: '#16a34a' }}>{origenNombre}</span>
+                {' → '}
+                <span style={{ color: '#dc2626' }}>{destinoNombre}</span>
+            </div>
+
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                Cliente: <strong style={{ color: '#374151' }}>{envio.cliente || 'N/A'}</strong>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#374151' }}>
+                <div>
+                    📦 {envio.numProductos} productos
+                </div>
+                <div>
+                    ✈️ {envio.totalVuelos} vuelo{envio.totalVuelos !== 1 ? 's' : ''}
+                </div>
+                {envio.totalPartes > 1 && (
+                    <div>
+                        🔀 {envio.totalPartes} partes
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+EnvioPendienteItem.displayName = 'EnvioPendienteItem';
+
 export default function PanelCatalogos({
     isOpen,
     onClose,
     onSelectVuelo,
     onSelectEnvio,
     onSelectAeropuerto,
+    onSelectRutaEnvio,
     aeropuertos: aeropuertosProp = [],
     vuelosCache = [],
     vuelosConEnvios = [],
@@ -254,6 +321,15 @@ export default function PanelCatalogos({
     const [aeropuertos, setAeropuertos] = useState(aeropuertosProp);
     // Usar siempre vuelosCache si está disponible
     const [vuelos, setVuelos] = useState(vuelosCache);
+
+    // Estados de búsqueda
+    const [busquedaAeropuerto, setBusquedaAeropuerto] = useState('');
+    const [busquedaVuelo, setBusquedaVuelo] = useState('');
+    const [busquedaEnvio, setBusquedaEnvio] = useState('');
+    const [busquedaRutaEnvio, setBusquedaRutaEnvio] = useState('');
+
+    // Estado para envíos pendientes (con rutas)
+    const [enviosPendientes, setEnviosPendientes] = useState([]);
 
     // Sincronizar con vuelosCache cuando cambie
     useEffect(() => {
@@ -271,6 +347,24 @@ export default function PanelCatalogos({
 
     // ⚡ OPTIMIZACIÓN: Cache de datos para evitar recálculos
     const datosCache = useRef({ aeropuertos: [], vuelos: [], lastFetch: 0 });
+
+    // Cargar envíos pendientes cuando se abre el catálogo de rutas
+    useEffect(() => {
+        if (isOpen && catalogoActivo === 'rutasEnvios') {
+            const cargarEnviosPendientes = async () => {
+                setCargando(true);
+                try {
+                    const pendientes = await obtenerEnviosPendientes();
+                    setEnviosPendientes(pendientes);
+                } catch (error) {
+                    console.error('Error al cargar envíos pendientes:', error);
+                } finally {
+                    setCargando(false);
+                }
+            };
+            cargarEnviosPendientes();
+        }
+    }, [isOpen, catalogoActivo]);
 
     // ✅ Suscribirse al tiempo de simulación para actualización en tiempo real
     useEffect(() => {
@@ -363,10 +457,28 @@ export default function PanelCatalogos({
         return envios;
     }, [catalogoActivo, enviosProp, envios]);
 
+    // ⚡ OPTIMIZACIÓN: Memoizar filtrado de envíos
+    const enviosFiltrados = useMemo(() => {
+        if (!busquedaEnvio.trim()) return enviosFuente;
+
+        const termino = busquedaEnvio.toLowerCase().trim();
+        return enviosFuente.filter(e => {
+            const envioId = String(e.envioId || '');
+            const vueloId = String(e.vueloId || '');
+            const origen = (e.origen || '').toLowerCase();
+            const destino = (e.destino || '').toLowerCase();
+
+            return envioId.includes(termino) ||
+                vueloId.includes(termino) ||
+                origen.includes(termino) ||
+                destino.includes(termino);
+        });
+    }, [enviosFuente, busquedaEnvio]);
+
     // ✅ Agrupar envíos por avión (vueloId) para mejor experiencia
     const enviosAgrupados = useMemo(() => {
         const map = new Map();
-        for (const e of enviosFuente) {
+        for (const e of enviosFiltrados) {
             const key = e.vueloId ?? 'sinVuelo';
             if (!map.has(key)) map.set(key, []);
             map.get(key).push(e);
@@ -376,7 +488,7 @@ export default function PanelCatalogos({
             items,
             totalCantidad: items.reduce((s, i) => s + (i.cantidad || 0), 0)
         }));
-    }, [enviosFuente]);
+    }, [enviosFiltrados]);
 
     // ✅ Recargar datos cada 30 segundos (solo vuelos, aeropuertos se actualizan automáticamente desde Mapa)
     useEffect(() => {
@@ -399,9 +511,27 @@ export default function PanelCatalogos({
         return Math.max(0, Math.min(100, (transcurrido / total) * 100));
     }, [nowMs]);
 
+    // ⚡ OPTIMIZACIÓN: Memoizar filtrado de aeropuertos
+    const aeropuertosFiltrados = useMemo(() => {
+        if (!busquedaAeropuerto.trim()) return aeropuertos;
+
+        const termino = busquedaAeropuerto.toLowerCase().trim();
+        return aeropuertos.filter(a => {
+            const codigo = (a.codigo || '').toLowerCase();
+            const ciudad = (a.ciudad || '').toLowerCase();
+            const pais = typeof a.pais === 'string' ? a.pais.toLowerCase() : (a.pais?.nombre || '').toLowerCase();
+            const id = String(a.id || '');
+
+            return codigo.includes(termino) ||
+                ciudad.includes(termino) ||
+                pais.includes(termino) ||
+                id.includes(termino);
+        });
+    }, [aeropuertos, busquedaAeropuerto]);
+
     // ⚡ OPTIMIZACIÓN: Memoizar filtrado de vuelos activos
     const vuelosActivos = useMemo(() => {
-        return vuelos.filter(v => {
+        const activos = vuelos.filter(v => {
             const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
             const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
             if (!hIni || !hFin) return false;
@@ -409,12 +539,54 @@ export default function PanelCatalogos({
             const fin = hFin.getTime();
             return nowMs >= ini && nowMs < fin;
         });
-    }, [vuelos, nowMs]);
+
+        if (!busquedaVuelo.trim()) return activos;
+
+        const termino = busquedaVuelo.toLowerCase().trim();
+        return activos.filter(v => {
+            const id = String(v.id || v.idTramo || '');
+            const origenCiudad = (v.origen?.ciudad || '').toLowerCase();
+            const origenCodigo = (v.origen?.codigo || '').toLowerCase();
+            const destinoCiudad = (v.destino?.ciudad || '').toLowerCase();
+            const destinoCodigo = (v.destino?.codigo || '').toLowerCase();
+
+            return id.includes(termino) ||
+                origenCiudad.includes(termino) ||
+                origenCodigo.includes(termino) ||
+                destinoCiudad.includes(termino) ||
+                destinoCodigo.includes(termino);
+        });
+    }, [vuelos, nowMs, busquedaVuelo]);
+
+    // ⚡ OPTIMIZACIÓN: Memoizar filtrado de envíos pendientes
+    const enviosPendientesFiltrados = useMemo(() => {
+        if (!busquedaRutaEnvio.trim()) return enviosPendientes;
+
+        const termino = busquedaRutaEnvio.toLowerCase().trim();
+        return enviosPendientes.filter(e => {
+            const id = String(e.id || '');
+            const idPorAeropuerto = String(e.idEnvioPorAeropuerto || '');
+            const cliente = (e.cliente || '').toLowerCase();
+            const origenCiudad = (e.aeropuertoOrigen?.ciudad || '').toLowerCase();
+            const origenCodigo = (e.aeropuertoOrigen?.codigo || '').toLowerCase();
+            const destinoCiudad = (e.aeropuertoDestino?.ciudad || '').toLowerCase();
+            const destinoCodigo = (e.aeropuertoDestino?.codigo || '').toLowerCase();
+
+            return id.includes(termino) ||
+                idPorAeropuerto.includes(termino) ||
+                cliente.includes(termino) ||
+                origenCiudad.includes(termino) ||
+                origenCodigo.includes(termino) ||
+                destinoCiudad.includes(termino) ||
+                destinoCodigo.includes(termino);
+        });
+    }, [enviosPendientes, busquedaRutaEnvio]);
 
     const catalogos = [
         { id: 'aeropuertos', nombre: 'Aeropuertos' },
         { id: 'vuelos', nombre: 'Vuelos Activos' },
-        { id: 'envios', nombre: 'Envíos Activos' }
+        { id: 'envios', nombre: 'Envíos Activos' },
+        { id: 'rutasEnvios', nombre: 'Rutas de Envíos' }
     ];
 
     const renderContenido = () => {
@@ -432,7 +604,7 @@ export default function PanelCatalogos({
         }
 
         if (catalogoActivo === 'aeropuertos') {
-            if (aeropuertos.length === 0) {
+            if (aeropuertosFiltrados.length === 0) {
                 return (
                     <div style={{
                         padding: 40,
@@ -440,11 +612,11 @@ export default function PanelCatalogos({
                         color: '#9ca3af',
                         fontSize: 14
                     }}>
-                        No hay aeropuertos disponibles
+                        {busquedaAeropuerto.trim() ? 'No se encontraron aeropuertos' : 'No hay aeropuertos disponibles'}
                     </div>
                 );
             }
-            return aeropuertos.map((item, idx) => (
+            return aeropuertosFiltrados.map((item, idx) => (
                 <AeropuertoItem
                     key={item.id || idx}
                     item={item}
@@ -462,7 +634,7 @@ export default function PanelCatalogos({
                         color: '#9ca3af',
                         fontSize: 14
                     }}>
-                        No hay vuelos activos en este momento
+                        {busquedaVuelo.trim() ? 'No se encontraron vuelos' : 'No hay vuelos activos en este momento'}
                     </div>
                 );
             }
@@ -480,7 +652,7 @@ export default function PanelCatalogos({
         }
 
         if (catalogoActivo === 'envios') {
-            if (enviosFuente.length === 0) {
+            if (enviosFiltrados.length === 0) {
                 return (
                     <div style={{
                         padding: 40,
@@ -488,7 +660,7 @@ export default function PanelCatalogos({
                         color: '#9ca3af',
                         fontSize: 14
                     }}>
-                        No hay envíos en circulación
+                        {busquedaEnvio.trim() ? 'No se encontraron envíos' : 'No hay envíos en circulación'}
                     </div>
                 );
             }
@@ -524,14 +696,37 @@ export default function PanelCatalogos({
             );
         }
 
+        if (catalogoActivo === 'rutasEnvios') {
+            if (enviosPendientesFiltrados.length === 0) {
+                return (
+                    <div style={{
+                        padding: 40,
+                        textAlign: 'center',
+                        color: '#9ca3af',
+                        fontSize: 14
+                    }}>
+                        {busquedaRutaEnvio.trim() ? 'No se encontraron envíos' : 'No hay envíos pendientes con rutas asignadas'}
+                    </div>
+                );
+            }
+            return enviosPendientesFiltrados.map((item, idx) => (
+                <EnvioPendienteItem
+                    key={item.id || idx}
+                    envio={item}
+                    onSelect={onSelectRutaEnvio}
+                />
+            ));
+        }
+
         return null;
     };
 
     if (!isOpen) return null;
 
-    const datosCount = catalogoActivo === 'aeropuertos' ? aeropuertos.length :
+    const datosCount = catalogoActivo === 'aeropuertos' ? aeropuertosFiltrados.length :
         catalogoActivo === 'vuelos' ? vuelosActivos.length :
-            enviosFuente.length;
+            catalogoActivo === 'rutasEnvios' ? enviosPendientesFiltrados.length :
+                enviosFiltrados.length;
 
     return (
         <div
@@ -619,6 +814,81 @@ export default function PanelCatalogos({
                 color: '#6b7280'
             }}>
                 {cargando ? 'Cargando...' : `${datosCount} registro${datosCount !== 1 ? 's' : ''}`}
+            </div>
+
+            {/* Buscador */}
+            <div style={{
+                padding: '12px 16px',
+                background: 'white',
+                borderBottom: '1px solid #e5e7eb'
+            }}>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: '#f9fafb',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    border: '1px solid #e5e7eb'
+                }}>
+                    <Search size={16} color="#6b7280" />
+                    <input
+                        type="text"
+                        placeholder={
+                            catalogoActivo === 'aeropuertos' ? 'Buscar por código, ciudad, país...' :
+                                catalogoActivo === 'vuelos' ? 'Buscar por ID, origen, destino...' :
+                                    catalogoActivo === 'rutasEnvios' ? 'Buscar por ID, cliente, origen, destino...' :
+                                        'Buscar por ID de envío, vuelo...'
+                        }
+                        value={
+                            catalogoActivo === 'aeropuertos' ? busquedaAeropuerto :
+                                catalogoActivo === 'vuelos' ? busquedaVuelo :
+                                    catalogoActivo === 'rutasEnvios' ? busquedaRutaEnvio :
+                                        busquedaEnvio
+                        }
+                        onChange={(e) => {
+                            if (catalogoActivo === 'aeropuertos') setBusquedaAeropuerto(e.target.value);
+                            else if (catalogoActivo === 'vuelos') setBusquedaVuelo(e.target.value);
+                            else if (catalogoActivo === 'rutasEnvios') setBusquedaRutaEnvio(e.target.value);
+                            else setBusquedaEnvio(e.target.value);
+                        }}
+                        style={{
+                            flex: 1,
+                            border: 'none',
+                            background: 'transparent',
+                            outline: 'none',
+                            fontSize: 13,
+                            color: '#111827'
+                        }}
+                    />
+                    {((catalogoActivo === 'aeropuertos' && busquedaAeropuerto) ||
+                        (catalogoActivo === 'vuelos' && busquedaVuelo) ||
+                        (catalogoActivo === 'envios' && busquedaEnvio) ||
+                        (catalogoActivo === 'rutasEnvios' && busquedaRutaEnvio)) && (
+                            <button
+                                onClick={() => {
+                                    if (catalogoActivo === 'aeropuertos') setBusquedaAeropuerto('');
+                                    else if (catalogoActivo === 'vuelos') setBusquedaVuelo('');
+                                    else if (catalogoActivo === 'rutasEnvios') setBusquedaRutaEnvio('');
+                                    else setBusquedaEnvio('');
+                                }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    padding: 2,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    color: '#6b7280',
+                                    borderRadius: 4
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.color = '#111827'}
+                                onMouseLeave={(e) => e.currentTarget.style.color = '#6b7280'}
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                </div>
             </div>
 
             {/* Contenido scrollable */}
