@@ -14,13 +14,6 @@
   --foreground: #fff;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #ffffff;
@@ -122,6 +115,22 @@ body {
 .btn-accent:focus {
   outline: 2px solid rgba(129, 140, 248, 0.6);
   outline-offset: 2px;
+}
+
+.btn-envios {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 1400;
+  border: none;
+  padding: 10px 16px;
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .btn-red {
@@ -269,6 +278,7 @@ body {
     opacity: 0;
     transform: translateY(16px) scale(0.96);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);

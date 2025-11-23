@@ -722,8 +722,7 @@ export default function Mapa() {
     if (!Array.isArray(vuelos)) return [];
     const ahoraMs = throttledNowMs;
     const BUFFER_MS = 2 * 60 * 1000; // 2 minutos extra tras llegada
-    const list = vuelos
-      .map(v => {
+    const list = vuelos.map(v => {
         if (!(v.horaOrigen instanceof Date) || !(v.horaDestino instanceof Date)) return null;
         if (ahoraMs < v.horaOrigen.getTime()) return null;
         // Permitir que el vuelo siga visible hasta 2 minutos después de la llegada
@@ -737,8 +736,7 @@ export default function Mapa() {
         const heading = calcularRumboActual(pos.lat, pos.lon, v.latDestino, v.lonDestino);
         const rotation = aplicarOffsetRotacion(heading);
         return { ...v, pos, heading, rotation, tieneEnvios };
-      })
-      .filter(Boolean);
+      }).filter(Boolean);
 
     // Priorizar los que tienen envíos (para mejor visualización)
     list.sort((a, b) => {
