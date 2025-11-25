@@ -9,12 +9,19 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
     useEffect(() => { const u = subscribe(ms => setNowMs(ms)); return () => u(); }, []);
     if (!vuelo) return null;
 
-    // Usar historial completo si los envíos actuales están vacíos pero hubo envíos antes
+    // Envíos realmente transportados (actuales o históricos completados)
     let enviosAsignados = Array.isArray(vuelo.raw?.enviosAsignados) && vuelo.raw.enviosAsignados.length > 0
         ? vuelo.raw.enviosAsignados
         : (Array.isArray(vuelo.raw?.__historialEnviosCompletos) && vuelo.raw.__historialEnviosCompletos.length > 0
             ? vuelo.raw.__historialEnviosCompletos
             : []);
+
+    // Envíos planificados (provenientes de rutas) que aún no aparecen como transportados
+    const planificadosRaw = Array.isArray(vuelo.raw?.__enviosPlanificados) ? vuelo.raw.__enviosPlanificados : [];
+    const idsYaTransportados = new Set(enviosAsignados.map(e => (e.envioId ?? e.id))); // evitar duplicados
+    const enviosPlanificados = planificadosRaw.filter(e => !idsYaTransportados.has(e.envioId));
+
+    console.log(`✈️ Vuelo #${vuelo?.idTramo}: ${enviosAsignados.length} transportados, ${enviosPlanificados.length} planificados`);
 
     const capacidadMax = vuelo.raw?.capacidadMaxima ?? 300;
     // Calcular capacidad ocupada usando historial si no hay envíos actuales
@@ -171,6 +178,45 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
                         </div>
                     )}
                 </div>
+
+                {enviosPlanificados.length > 0 && (
+                    <div style={{ background: "#f8fafc", borderRadius: 12, padding: 12, marginTop: 16 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                            <Package size={16} color="#0d9488" />
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#0d9488" }}>
+                                Envíos planificados próximos ({enviosPlanificados.length})
+                            </span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {enviosPlanificados.map((e, idx) => (
+                                <div key={idx} style={{ background: "white", borderRadius: 8, border: "1px solid #e2e8f0", padding: 10 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>Envío #{e.envioId}</span>
+                                        <span style={{ fontSize: 11, background: "#ccfbf1", color: "#0d9488", borderRadius: 4, padding: "2px 8px", fontWeight: 700 }}>
+                                            {e.cantidad} u
+                                        </span>
+                                    </div>
+                                    {(e.origen) && (
+                                        <div style={{ fontSize: 12, color: "#64748b", display: "flex", alignItems: "center", gap: 6 }}>
+                                            <MapPin size={14} /> Origen: {e.origen}
+                                        </div>
+                                    )}
+                                    {(e.destino) && (
+                                        <div style={{ fontSize: 12, color: "#64748b", display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                                            <MapPin size={14} /> Destino: {e.destino}
+                                        </div>
+                                    )}
+                                    {(e.horaSalidaPlan || e.horaLlegadaPlan) && (
+                                        <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>
+                                            {e.horaSalidaPlan && <span>Salida: {e.horaSalidaPlan.toLocaleString()} </span>}
+                                            {e.horaLlegadaPlan && <span>· Llegada: {e.horaLlegadaPlan.toLocaleString()}</span>}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Horarios */}
                 <div style={{ marginTop: 16 }}>

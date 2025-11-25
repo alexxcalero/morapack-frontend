@@ -241,14 +241,116 @@ const EnvioItem = memo(({ envio, onSelect }) => {
 EnvioItem.displayName = 'EnvioItem';
 
 // Componente para envío pendiente (con rutas completas)
-const EnvioPendienteItem = memo(({ envio, onSelect }) => {
-    const origenNombre = envio.aeropuertoOrigen?.ciudad
-        ? `${envio.aeropuertoOrigen.ciudad} (${envio.aeropuertoOrigen.codigo || ''})`
-        : 'Origen desconocido';
+const EnvioPendienteItem = memo(({ envio, onSelect, aeropuertos = [], vuelosMap, selectedVuelo = null }) => {
+    const findAeropuertoById = (id) => {
+        if (id == null) return null;
+        return aeropuertos.find(a => String(a.id) === String(id)) || null;
+    };
+    const resolveAeropuertoNombre = (ap, fallbackLabel = 'Desconocido') => {
+        if (!ap && ap !== 0) return `${fallbackLabel} desconocido`;
+        if (typeof ap === 'string') return ap;
+        if (typeof ap === 'number') {
+            const f = findAeropuertoById(ap);
+            return f ? `${f.ciudad} (${f.codigo})` : `${fallbackLabel} ID ${ap}`;
+        }
+        if (ap?.ciudad) return `${ap.ciudad}${ap.codigo ? ` (${ap.codigo})` : ''}`;
+        if (ap?.codigo) return `(${ap.codigo})`;
+        if (ap?.id != null) {
+            const f = findAeropuertoById(ap.id);
+            return f ? `${f.ciudad} (${f.codigo})` : `${fallbackLabel} ID ${ap.id}`;
+        }
+        return `${fallbackLabel} desconocido`;
+    };
+    const formatShort = (s) => {
+        if (!s) return 'N/A';
+        // Si ya es un objeto Date, usarlo directamente
+        if (s instanceof Date) {
+            return s.toLocaleString('es-ES', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+        // Si es string, intentar parsearlo
+        const baseDate = parsePlanificadorTime(s) || parseBackendTime(s) || new Date(s);
+        if (!baseDate || isNaN(baseDate.getTime())) return String(s);
+        return baseDate.toLocaleString('es-ES', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    };
+    // Local helper: encontrar un vuelo consistente en el mapa usando múltiples posibles IDs
+    const getVueloFromMap = (v) => {
+        const candidates = [v?.id, v?.idTramo, v?.idVuelo, v?.planDeVueloId]
+            .filter(x => x != null)
+            .map(x => String(x).trim());
+        // 1) Preferir el vuelo actualmente seleccionado si coincide por ID
+        if (selectedVuelo && candidates.length) {
+            const selIds = [selectedVuelo?.idTramo, selectedVuelo?.id, selectedVuelo?.raw?.id, selectedVuelo?.raw?.idTramo]
+                .filter(x => x != null)
+                .map(x => String(x).trim());
+            if (candidates.some(k => selIds.includes(k))) return selectedVuelo;
+        }
+        // 2) Buscar en el mapa por claves directas
+        if (vuelosMap) {
+            for (const k of candidates) {
+                const m = vuelosMap.get(k);
+                if (m) return m;
+            }
+            // 3) Fallback: escanear por coincidencia de cualquiera de los IDs conocidos
+            for (const [, m] of vuelosMap) {
+                const ids = [m?.idTramo, m?.id, m?.raw?.id, m?.raw?.idTramo]
+                    .filter(x => x != null)
+                    .map(x => String(x).trim());
+                if (candidates.some(k => ids.includes(k))) return m;
+            }
+        }
+        return null;
+    };
+    // Mejorar origen/destino: soportar string, objeto, o nulo
+    const origenNombre = resolveAeropuertoNombre(envio.aeropuertoOrigen, 'Origen');
+    const destinoNombre = resolveAeropuertoNombre(envio.aeropuertoDestino, 'Destino');
 
-    const destinoNombre = envio.aeropuertoDestino?.ciudad
-        ? `${envio.aeropuertoDestino.ciudad} (${envio.aeropuertoDestino.codigo || ''})`
-        : 'Destino desconocido';
+    const tieneRuta = envio.totalVuelos > 0;
+
+    // Mostrar info de vuelos si tiene ruta
+    // Preferir 'envio.vuelosInfo' si ya viene simplificado desde la API de catálogo
+    let vuelosInfo = [];
+    if (Array.isArray(envio.vuelosInfo) && envio.vuelosInfo.length > 0) {
+        vuelosInfo = envio.vuelosInfo.map(v => {
+            const origenV = resolveAeropuertoNombre(v.ciudadOrigen, 'Origen');
+            const destinoV = resolveAeropuertoNombre(v.ciudadDestino, 'Destino');
+            // Intentar tomar hora desde mapa de vuelos (inyectado vía prop) para consistencia
+            const match = getVueloFromMap(v);
+            let horaSalidaDate = match?.horaOrigen;
+            let horaLlegadaDate = match?.horaDestino;
+            return {
+                id: v.id,
+                origen: origenV,
+                destino: destinoV,
+                horaSalida: formatShort(horaSalidaDate || v.horaSalida),
+                horaLlegada: formatShort(horaLlegadaDate || v.horaLlegada)
+            };
+        });
+    } else if (Array.isArray(envio.parteAsignadas)) {
+        envio.parteAsignadas.forEach(parte => {
+            if (Array.isArray(parte.vuelosRuta)) {
+                parte.vuelosRuta.forEach(vr => {
+                    const vuelo = vr.planDeVuelo || vr;
+                    if (!vuelo) return;
+                    const origenV = resolveAeropuertoNombre(vuelo.ciudadOrigen, 'Origen');
+                    const destinoV = resolveAeropuertoNombre(vuelo.ciudadDestino, 'Destino');
+                    const vueloMapMatch = getVueloFromMap(vuelo);
+                    vuelosInfo.push({
+                        id: vuelo.id,
+                        origen: origenV,
+                        destino: destinoV,
+                        horaSalida: formatShort(vueloMapMatch?.horaOrigen || vuelo.horaSalida || vuelo.horaOrigen),
+                        horaLlegada: formatShort(vueloMapMatch?.horaDestino || vuelo.horaLlegada || vuelo.horaDestino)
+                    });
+                });
+            }
+        });
+    }
 
     return (
         <div
@@ -256,22 +358,27 @@ const EnvioPendienteItem = memo(({ envio, onSelect }) => {
             style={{
                 padding: '12px',
                 borderBottom: '1px solid #e5e7eb',
-                background: '#fafafa',
+                background: tieneRuta ? '#fafafa' : '#fef3c7',
                 fontSize: 13,
                 cursor: 'pointer',
                 transition: 'background 0.2s'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
-            onMouseLeave={(e) => e.currentTarget.style.background = '#fafafa'}
+            onMouseEnter={(e) => e.currentTarget.style.background = tieneRuta ? '#f0f0f0' : '#fde68a'}
+            onMouseLeave={(e) => e.currentTarget.style.background = tieneRuta ? '#fafafa' : '#fef3c7'}
         >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <Route size={16} color="#1976d2" />
-                <span style={{ fontWeight: 700, color: '#1976d2', fontSize: 14 }}>
+                <Route size={16} color={tieneRuta ? '#1976d2' : '#f59e0b'} />
+                <span style={{ fontWeight: 700, color: tieneRuta ? '#1976d2' : '#f59e0b', fontSize: 14 }}>
                     Envío #{envio.id}
                 </span>
                 {envio.idEnvioPorAeropuerto && (
                     <span style={{ fontSize: 11, color: '#6b7280' }}>
                         (#{envio.idEnvioPorAeropuerto})
+                    </span>
+                )}
+                {!tieneRuta && (
+                    <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600, marginLeft: 'auto' }}>
+                        ⏳ Sin ruta
                     </span>
                 )}
             </div>
@@ -290,15 +397,37 @@ const EnvioPendienteItem = memo(({ envio, onSelect }) => {
                 <div>
                     📦 {envio.numProductos} productos
                 </div>
-                <div>
-                    ✈️ {envio.totalVuelos} vuelo{envio.totalVuelos !== 1 ? 's' : ''}
-                </div>
-                {envio.totalPartes > 1 && (
-                    <div>
-                        🔀 {envio.totalPartes} partes
+                {tieneRuta ? (
+                    <>
+                        <div>
+                            ✈️ {envio.totalVuelos} vuelo{envio.totalVuelos !== 1 ? 's' : ''}
+                        </div>
+                        {envio.totalPartes > 1 && (
+                            <div>
+                                🔀 {envio.totalPartes} partes
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div style={{ color: '#f59e0b', fontWeight: 500 }}>
+                        Esperando planificación
                     </div>
                 )}
             </div>
+
+            {/* Mostrar info de vuelos si tiene ruta */}
+            {tieneRuta && vuelosInfo.length > 0 && (
+                <div style={{ marginTop: 10, padding: '10px 12px', background: '#e5e7eb', borderRadius: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6, color: '#111827' }}>Vuelos de la ruta</div>
+                    <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                        {vuelosInfo.map((v, idx) => (
+                            <li key={v.id || idx} style={{ fontSize: 12, marginBottom: 4, color: '#1f2937' }}>
+                                ✈️ <b>#{v.id}</b>: {v.origen} → {v.destino} <span style={{ color: '#111827' }}>[{v.horaSalida} - {v.horaLlegada}]</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
         </div>
     );
 });
@@ -315,7 +444,9 @@ export default function PanelCatalogos({
     aeropuertos: aeropuertosProp = [],
     vuelosCache = [],
     vuelosConEnvios = [],
-    envios: enviosProp = null
+    envios: enviosProp = null,
+    selectedVuelo = null,
+    onEnviosLoaded = null
 }) {
     const [catalogoActivo, setCatalogoActivo] = useState('vuelos');
     const [aeropuertos, setAeropuertos] = useState(aeropuertosProp);
@@ -344,9 +475,56 @@ export default function PanelCatalogos({
     const [envios, setEnvios] = useState([]);
     const [cargando, setCargando] = useState(false);
     const [nowMs, setNowMs] = useState(() => getSimMs());
+    // Ref estable para tiempo de simulación para evitar re-crear intervalos
+    const simTimeRef = useRef(nowMs);
+
+    function sanitizeRutas(lista, currentMs) {
+        if (!Array.isArray(lista)) return [];
+        const BUFFER_MS = 5 * 60 * 1000; // 5 min gracia
+        return lista.filter(envio => {
+            if (!Array.isArray(envio.vuelosInfo) || envio.vuelosInfo.length === 0) return true;
+            let maxArrival = 0;
+            for (const v of envio.vuelosInfo) {
+                const raw = v.horaLlegada || v.horaDestino || v.horaFin;
+                const d = parsePlanificadorTime(raw) || parseBackendTime(raw) || (raw ? new Date(raw) : null);
+                if (!d || isNaN(d.getTime())) continue;
+                const hasOffset = /\(UTC[+\-]\d{2}:\d{2}\)/.test(String(raw));
+                const SIM_OFFSET_MINUTES = -5 * 60;
+                const arrivalMs = hasOffset ? (d.getTime() + SIM_OFFSET_MINUTES * 60 * 1000) : d.getTime();
+                if (arrivalMs > maxArrival) maxArrival = arrivalMs;
+            }
+            if (maxArrival === 0) return true;
+            return currentMs <= maxArrival + BUFFER_MS;
+        });
+    }
 
     // ⚡ OPTIMIZACIÓN: Cache de datos para evitar recálculos
     const datosCache = useRef({ aeropuertos: [], vuelos: [], lastFetch: 0 });
+
+    // 🔄 CARGA INICIAL: Cargar envíos pendientes al montar el componente (sin depender de isOpen)
+    // Esto permite que los vuelos inyectados aparezcan en el mapa desde el inicio
+    useEffect(() => {
+        const cargarEnviosIniciales = async () => {
+            try {
+                const pendientes = await obtenerEnviosPendientes();
+                const sanitized = sanitizeRutas(pendientes, simTimeRef.current);
+                // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
+                const ordenados = sanitized.sort((a, b) => {
+                    const fechaA = a.fechaIngreso ? new Date(a.fechaIngreso).getTime() : 0;
+                    const fechaB = b.fechaIngreso ? new Date(b.fechaIngreso).getTime() : 0;
+                    return fechaA - fechaB;
+                });
+                setEnviosPendientes(ordenados);
+                // Notificar al padre para inyectar vuelos en el mapa
+                if (onEnviosLoaded && typeof onEnviosLoaded === 'function') {
+                    onEnviosLoaded(ordenados);
+                }
+            } catch (error) {
+                console.error('❌ Error al cargar envíos iniciales:', error);
+            }
+        };
+        cargarEnviosIniciales();
+    }, []); // Solo al montar el componente
 
     // Cargar envíos pendientes cuando se abre el catálogo de rutas
     useEffect(() => {
@@ -355,7 +533,18 @@ export default function PanelCatalogos({
                 setCargando(true);
                 try {
                     const pendientes = await obtenerEnviosPendientes();
-                    setEnviosPendientes(pendientes);
+                    const sanitized = sanitizeRutas(pendientes, simTimeRef.current);
+                    // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
+                    const ordenados = sanitized.sort((a, b) => {
+                        const fechaA = a.fechaIngreso ? new Date(a.fechaIngreso).getTime() : 0;
+                        const fechaB = b.fechaIngreso ? new Date(b.fechaIngreso).getTime() : 0;
+                        return fechaA - fechaB;
+                    });
+                    setEnviosPendientes(ordenados);
+                    // Notificar al padre sobre los envíos cargados
+                    if (onEnviosLoaded && typeof onEnviosLoaded === 'function') {
+                        onEnviosLoaded(ordenados);
+                    }
                 } catch (error) {
                     console.error('Error al cargar envíos pendientes:', error);
                 } finally {
@@ -366,9 +555,34 @@ export default function PanelCatalogos({
         }
     }, [isOpen, catalogoActivo]);
 
+    // Refresco periódico para rutas de envíos
+    useEffect(() => {
+        if (!(isOpen && catalogoActivo === 'rutasEnvios')) return;
+        const interval = setInterval(async () => {
+            try {
+                const pendientes = await obtenerEnviosPendientes();
+                const sanitized = sanitizeRutas(pendientes, simTimeRef.current);
+                // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
+                const ordenados = sanitized.sort((a, b) => {
+                    const fechaA = a.fechaIngreso ? new Date(a.fechaIngreso).getTime() : 0;
+                    const fechaB = b.fechaIngreso ? new Date(b.fechaIngreso).getTime() : 0;
+                    return fechaA - fechaB;
+                });
+                setEnviosPendientes(ordenados);
+                // Notificar al padre sobre los envíos actualizados
+                if (onEnviosLoaded && typeof onEnviosLoaded === 'function') {
+                    onEnviosLoaded(ordenados);
+                }
+            } catch (e) {
+                console.error('Error refrescando rutas de envíos:', e);
+            }
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [isOpen, catalogoActivo]);
+
     // ✅ Suscribirse al tiempo de simulación para actualización en tiempo real
     useEffect(() => {
-        const unsub = subscribe(ms => setNowMs(ms));
+        const unsub = subscribe(ms => { setNowMs(ms); simTimeRef.current = ms; });
         return () => unsub();
     }, []);
 
@@ -490,6 +704,18 @@ export default function PanelCatalogos({
         }));
     }, [enviosFiltrados]);
 
+    // Mapa de vuelos para obtener horas ya parseadas (consistencia con PanelVueloDetalle)
+    const vuelosMap = useMemo(() => {
+        const m = new Map();
+        (vuelos || []).forEach(v => {
+            const keys = [v?.idTramo, v?.id, v?.raw?.id, v?.raw?.idTramo]
+                .filter(x => x != null)
+                .map(x => String(x).trim());
+            keys.forEach(k => m.set(k, v));
+        });
+        return m;
+    }, [vuelos]);
+
     // ✅ Recargar datos cada 30 segundos (solo vuelos, aeropuertos se actualizan automáticamente desde Mapa)
     useEffect(() => {
         if (!isOpen) return;
@@ -561,24 +787,11 @@ export default function PanelCatalogos({
     // ⚡ OPTIMIZACIÓN: Memoizar filtrado de envíos pendientes
     const enviosPendientesFiltrados = useMemo(() => {
         if (!busquedaRutaEnvio.trim()) return enviosPendientes;
-
         const termino = busquedaRutaEnvio.toLowerCase().trim();
         return enviosPendientes.filter(e => {
-            const id = String(e.id || '');
-            const idPorAeropuerto = String(e.idEnvioPorAeropuerto || '');
-            const cliente = (e.cliente || '').toLowerCase();
-            const origenCiudad = (e.aeropuertoOrigen?.ciudad || '').toLowerCase();
-            const origenCodigo = (e.aeropuertoOrigen?.codigo || '').toLowerCase();
-            const destinoCiudad = (e.aeropuertoDestino?.ciudad || '').toLowerCase();
-            const destinoCodigo = (e.aeropuertoDestino?.codigo || '').toLowerCase();
-
-            return id.includes(termino) ||
-                idPorAeropuerto.includes(termino) ||
-                cliente.includes(termino) ||
-                origenCiudad.includes(termino) ||
-                origenCodigo.includes(termino) ||
-                destinoCiudad.includes(termino) ||
-                destinoCodigo.includes(termino);
+            const id = String(e.id || '').toLowerCase();
+            const idPorAeropuerto = String(e.idEnvioPorAeropuerto || '').toLowerCase();
+            return id.includes(termino) || idPorAeropuerto.includes(termino);
         });
     }, [enviosPendientes, busquedaRutaEnvio]);
 
@@ -705,7 +918,7 @@ export default function PanelCatalogos({
                         color: '#9ca3af',
                         fontSize: 14
                     }}>
-                        {busquedaRutaEnvio.trim() ? 'No se encontraron envíos' : 'No hay envíos pendientes con rutas asignadas'}
+                        {busquedaRutaEnvio.trim() ? 'No se encontraron envíos' : 'No hay envíos pendientes'}
                     </div>
                 );
             }
@@ -713,7 +926,10 @@ export default function PanelCatalogos({
                 <EnvioPendienteItem
                     key={item.id || idx}
                     envio={item}
+                    aeropuertos={aeropuertos}
                     onSelect={onSelectRutaEnvio}
+                    vuelosMap={vuelosMap}
+                    selectedVuelo={selectedVuelo}
                 />
             ));
         }
@@ -837,7 +1053,7 @@ export default function PanelCatalogos({
                         placeholder={
                             catalogoActivo === 'aeropuertos' ? 'Buscar por código, ciudad, país...' :
                                 catalogoActivo === 'vuelos' ? 'Buscar por ID, origen, destino...' :
-                                    catalogoActivo === 'rutasEnvios' ? 'Buscar por ID, cliente, origen, destino...' :
+                                    catalogoActivo === 'rutasEnvios' ? 'Buscar por número de envío (ID o interno)...' :
                                         'Buscar por ID de envío, vuelo...'
                         }
                         value={
