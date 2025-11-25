@@ -2,16 +2,29 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { subscribe, getSimMs } from "../../../lib/simTime";
+import { subscribe, initSim } from "../../../lib/simTime";
+
+const LIMA_SIM_START_DATE = new Date(2025, 11, 20, 10, 0, 0); // mes 11 = diciembre
+const SIM_START_DIA_MS = LIMA_SIM_START_DATE.getTime();
 
 export default function HoraActual({
   locale = undefined,
   showUtc = true,
   style = {},
 }) {
-  const [nowMs, setNowMs] = useState(() => getSimMs());
+  const [nowMs, setNowMs] = useState(() => SIM_START_DIA_MS);
 
   useEffect(() => {
+    // Inicializar la simulación día a día en tiempo real
+    // partiendo del 20/12/2025 10:00 (Lima)
+    if (typeof initSim === "function") {
+      initSim({
+        startMs: SIM_START_DIA_MS,
+        speed: 1,          // 1x: avanza al mismo ritmo que el tiempo real
+      });
+    }
+
+    // Suscribirse a las actualizaciones del tiempo simulado
     const unsub = subscribe((ms) => setNowMs(ms));
     return () => unsub();
   }, []);
