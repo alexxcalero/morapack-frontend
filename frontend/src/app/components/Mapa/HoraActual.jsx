@@ -103,10 +103,10 @@ export default function HoraActual({ simulacionIniciada = false }) {
     return unsub;
   }, [activo]);
 
-  // Poll estado planificador
+  // Poll estado planificador (usando endpoint ligero para evitar cargar 43K+ envíos)
   const fetchEstado = useCallback(async () => {
     try {
-      const r = await fetch(`${API_BASE}/api/planificador/estado`);
+      const r = await fetch(`${API_BASE}/api/planificador/estado-simple`);
       const j = await r.json();
       const nuevoActivo = !!j?.planificadorActivo;
 

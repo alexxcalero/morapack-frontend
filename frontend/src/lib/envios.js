@@ -184,95 +184,47 @@ export function obtenerDescripcionRuta(rutaEnvio) {
 
 /**
  * Obtiene todos los envíos que aún no han sido entregados
+ * ⚡ OPTIMIZADO: Usa el nuevo endpoint /obtenerPendientes que solo retorna
+ * envíos con partes asignadas, evitando cargar 43K+ envíos y 28MB de JSON.
  * @returns {Promise<Array>} Array de envíos pendientes con información básica
  */
 export async function obtenerEnviosPendientes() {
     try {
-        const response = await fetch(`${API_BASE}/api/envios/obtenerTodos`);
+        // ⚡ OPTIMIZADO: Usar nuevo endpoint que solo retorna pendientes
+        const response = await fetch(`${API_BASE}/api/envios/obtenerPendientes`);
 
         if (!response.ok) {
-            console.error('Error al obtener envíos:', response.status);
+            console.error('Error al obtener envíos pendientes:', response.status);
             return [];
         }
 
-        const text = await response.text();
-
-        // Intentar parsear con manejo de circularidad
-        let envios;
-        try {
-            envios = JSON.parse(text);
-        } catch (parseError) {
-            console.error('Error parseando JSON de envíos (posible circularidad):', parseError.message);
-            console.log('Primeros 500 chars:', text.substring(0, 500));
-            return [];
-        }
+        const envios = await response.json();
 
         if (!Array.isArray(envios)) {
             console.warn('Respuesta no es array:', typeof envios);
             return [];
         }
 
-        // Filtrar envíos pendientes:
-        // - SOLO con partes asignadas y no todas entregadas → MOSTRAR
-        // - Sin partes asignadas (esperando planificación) → NO MOSTRAR
-        // - Todas las partes entregadas → NO MOSTRAR
-        const pendientes = envios.filter(envio => {
-            // Si no tiene partes asignadas, NO mostrar (esperando planificación)
-            if (!Array.isArray(envio.parteAsignadas) || envio.parteAsignadas.length === 0) {
-                return false;
-            }
+        console.log(`✅ Recibidos ${envios.length} envíos pendientes desde endpoint optimizado`);
 
-            // Si tiene partes, verificar si al menos una no ha sido entregada
-            const tienePartePendiente = envio.parteAsignadas.some(parte => !parte.entregado);
-
-            return tienePartePendiente;
-        });
-
-        // Mapear a formato enriquecido para el catálogo
-        return pendientes.map(envio => {
+        // El backend ya filtra y formatea, solo necesitamos mapear algunos campos
+        return envios.map(envio => {
             const partes = Array.isArray(envio.parteAsignadas) ? envio.parteAsignadas : [];
-            const partesNoEntregadas = partes.filter(p => !p.entregado);
 
-            const totalProductos = envio.numProductos || 0;
-            const productosAsignados = partes.reduce((sum, p) => sum + (p.cantidad || 0), 0);
-
+            // Calcular total de vuelos
             const totalVuelos = partes.reduce((sum, p) => sum + (p.vuelosRuta?.length || 0), 0);
 
-            // Resolver aeropuerto origen/destino si no vienen en el tope
-            let aeropuertoOrigen = envio.aeropuertoOrigen;
-            let aeropuertoDestino = envio.aeropuertoDestino;
-
-            const primeraParte = partesNoEntregadas[0] || partes[0];
-            if (!aeropuertoOrigen) {
-                aeropuertoOrigen = primeraParte?.aeropuertoOrigen || null;
-                // fallback adicional: del primer vuelo
-                const vr0 = primeraParte?.vuelosRuta?.[0];
-                const v0 = vr0?.planDeVuelo || vr0;
-                if (!aeropuertoOrigen && v0?.ciudadOrigen) aeropuertoOrigen = v0.ciudadOrigen;
-            }
-            if (!aeropuertoDestino) {
-                // intentar del último vuelo de la primera parte
-                const vuelosRuta = primeraParte?.vuelosRuta || [];
-                const lastVr = vuelosRuta.length > 0 ? vuelosRuta[vuelosRuta.length - 1] : null;
-                const vLast = lastVr?.planDeVuelo || lastVr;
-                if (vLast?.ciudadDestino) aeropuertoDestino = vLast.ciudadDestino;
-            }
-
-            // Construir lista simplificada de vuelos de la(s) ruta(s)
+            // Construir lista de vuelos info para el catálogo
             const vuelosInfo = [];
-            for (const parte of partesNoEntregadas.length > 0 ? partesNoEntregadas : partes) {
+            for (const parte of partes) {
                 const lista = Array.isArray(parte.vuelosRuta) ? parte.vuelosRuta.slice() : [];
                 lista.sort((a, b) => (a.orden || 0) - (b.orden || 0));
-                for (const vr of lista) {
-                    const v = vr?.planDeVuelo || vr;
+                for (const v of lista) {
                     if (!v) continue;
 
-                    // Parsear las fechas del REST API
-                    // El backend REST API envía: "2025-01-02T08:01:00" 
-                    // El WebSocket envía formato diferente que ya se parsea correctamente
-                    // Restar 7 horas para igualar al formato del WebSocket
-                    const horaSalidaRaw = v.horaSalida || v.horaOrigen;
-                    const horaLlegadaRaw = v.horaLlegada || v.horaDestino;
+                    // Parsear las fechas - el nuevo endpoint envía LocalDateTime directamente
+                    const horaSalidaRaw = v.horaSalida;
+                    const horaLlegadaRaw = v.horaLlegada;
 
                     let horaSalida = null;
                     let horaLlegada = null;
@@ -288,10 +240,11 @@ export async function obtenerEnviosPendientes() {
                     if (horaLlegadaRaw) {
                         const date = new Date(horaLlegadaRaw);
                         if (!isNaN(date.getTime())) {
-                            // Restar 7 horas para compensar la diferencia entre REST API y WebSocket
                             horaLlegada = new Date(date.getTime() - 7 * 60 * 60 * 1000);
                         }
-                    } vuelosInfo.push({
+                    }
+
+                    vuelosInfo.push({
                         id: v.id,
                         ciudadOrigen: v.ciudadOrigen || null,
                         ciudadDestino: v.ciudadDestino || null,
@@ -304,16 +257,17 @@ export async function obtenerEnviosPendientes() {
             return {
                 id: envio.id,
                 idEnvioPorAeropuerto: envio.idEnvioPorAeropuerto,
-                numProductos: totalProductos,
-                productosAsignados,
+                numProductos: envio.numProductos,
+                productosAsignados: envio.productosAsignados || 0,
                 cliente: envio.cliente,
-                aeropuertoOrigen,
-                aeropuertoDestino,
-                totalPartes: partes.length,
+                aeropuertoOrigen: partes[0]?.aeropuertoOrigen || null,
+                aeropuertoDestino: envio.aeropuertoDestino || null,
+                totalPartes: envio.totalPartes || partes.length,
                 totalVuelos,
                 fechaIngreso: envio.fechaIngreso,
-                // datos auxiliares para el catálogo
-                vuelosInfo
+                vuelosInfo,
+                // Mantener parteAsignadas para compatibilidad con EnvioPendienteItem
+                parteAsignadas: partes
             };
         });
     } catch (error) {
