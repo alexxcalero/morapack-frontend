@@ -37,9 +37,10 @@ export default function SimulationControls({ startStr = null }) {
         }
     }, [fechaInicio]);
 
+    // Usar endpoint ligero para polling frecuente (evita cargar 43K+ envíos)
     const fetchEstado = async () => {
         try {
-            const res = await fetch(`${API_BASE}/api/planificador/estado`);
+            const r = await fetch(`${API_BASE}/api/planificador/estado-simple`);
             const json = await res.json();
             setEstado({
                 activo: Boolean(json?.planificadorActivo),
@@ -80,9 +81,13 @@ export default function SimulationControls({ startStr = null }) {
             return;
         }
         setIniciando(true); // ← no bloquea la UI global, solo el botón
+        console.log(`🚀 [FRONTEND] Iniciando simulación a las ${new Date().toLocaleTimeString()}`);
         try {
-            // Primero limpiar la simulación anterior
-            await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
+            // Limpiar la simulación anterior SIN esperar (fire-and-forget)
+            // La limpieza se ejecuta en paralelo para no bloquear
+            fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" })
+                .then(() => console.log('✅ Limpieza completada'))
+                .catch(err => console.warn('⚠️ Error en limpieza (no crítico):', err));
 
             // Parsear fecha como hora local
             const [datePart, timePart] = fechaInicio.split('T');
@@ -132,11 +137,17 @@ export default function SimulationControls({ startStr = null }) {
     };
 
     const detener = async () => {
-        setEstado(s => ({ ...s, cargando: true }));
+        // Emitir evento inmediatamente para limpiar UI aunque el backend tarde o falle
+        try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
+        setEstado({ activo: false, cargando: true });
         try {
             await fetch(`${API_BASE}/api/planificador/detener`, { method: "POST" });
+        } catch (error) {
+            console.error('Error al detener:', error);
         } finally {
-            fetchEstado();
+            // Quitar el spinner y refrescar estado vía polling
+            setEstado(s => ({ ...s, cargando: false }));
+            setTimeout(fetchEstado, 500);
         }
     };
 

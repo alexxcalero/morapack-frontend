@@ -480,9 +480,10 @@ export default function PanelCatalogos({
 
     function sanitizeRutas(lista, currentMs) {
         if (!Array.isArray(lista)) return [];
-        const BUFFER_MS = 5 * 60 * 1000; // 5 min gracia
         return lista.filter(envio => {
             if (!Array.isArray(envio.vuelosInfo) || envio.vuelosInfo.length === 0) return true;
+
+            // Encontrar la hora de llegada final (último vuelo)
             let maxArrival = 0;
             for (const v of envio.vuelosInfo) {
                 const raw = v.horaLlegada || v.horaDestino || v.horaFin;
@@ -493,8 +494,13 @@ export default function PanelCatalogos({
                 const arrivalMs = hasOffset ? (d.getTime() + SIM_OFFSET_MINUTES * 60 * 1000) : d.getTime();
                 if (arrivalMs > maxArrival) maxArrival = arrivalMs;
             }
+
+            // Si no hay hora de llegada válida, mantener el envío
             if (maxArrival === 0) return true;
-            return currentMs <= maxArrival + BUFFER_MS;
+
+            // Mostrar el envío hasta que pase su hora de llegada final
+            // (currentMs <= maxArrival significa que aún no ha llegado o está llegando)
+            return currentMs <= maxArrival;
         });
     }
 

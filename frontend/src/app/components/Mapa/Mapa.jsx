@@ -13,7 +13,7 @@ import ReactDOMServer from "react-dom/server";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
-import ResumenSimulacion from "./ResumenSimulacion";
+import ModalResumen from "./ModalResumen";
 import useWebSocket from "../../../lib/useWebSocket";
 import { obtenerRutasEnvio, obtenerEnviosPendientes } from "../../../lib/envios";
 
@@ -282,17 +282,16 @@ export default function Mapa() {
   // Estados para visualizar rutas de envíos
   const [rutasEnvioSeleccionado, setRutasEnvioSeleccionado] = useState(null);
 
-  // Estados para el resumen de simulación
-  const [mostrarResumen, setMostrarResumen] = useState(false);
-  const [datosResumen, setDatosResumen] = useState({
-    enviosEntregados: 0,
-    productosEntregados: 0,
-    tiempoSimulacion: 0
-  });
   const yaSeDetuvoRef = useRef(false);
   const fechaInicioSimRef = useRef(null);
   const fechaFinSimRef = useRef(null);
   const [simulacionIniciada, setSimulacionIniciada] = useState(false);
+  const wasRunningRef = useRef(false); // ← Para detectar cambios en el estado de ejecución
+
+  // Estados para el modal de resumen
+  const [mostrarModalResumen, setMostrarModalResumen] = useState(false);
+  const [datosResumen, setDatosResumen] = useState(null);
+  const [esSimulacionDetenida, setEsSimulacionDetenida] = useState(false);
 
   // No inicialices initSim aquí: HoraActual es quien controla startMs.
   // Suscripción global a tiempo de simulación
@@ -300,6 +299,49 @@ export default function Mapa() {
   useEffect(() => {
     const unsub = subscribe(ms => setNowMs(ms));
     return () => unsub();
+  }, []);
+
+  // 🛑 Listener para detención inmediata de simulación
+  useEffect(() => {
+    const handleDetener = async () => {
+      console.log('🛑 Evento de detención recibido');
+
+      // Limpiar inmediatamente los vuelos
+      setVuelosCache([]);
+      setRawVuelos([]);
+      setLocalAirportCapacities({});
+      wasRunningRef.current = false;
+
+      // Obtener resumen de planificación
+      try {
+        const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+        if (resumenRes.ok) {
+          const resumen = await resumenRes.json();
+          console.log('📊 Resumen de planificación al detener:', resumen);
+
+          // Mostrar modal de resumen
+          setDatosResumen(resumen);
+          setEsSimulacionDetenida(true);
+          setMostrarModalResumen(true);
+        }
+      } catch (error) {
+        console.error('❌ Error al obtener resumen al detener:', error);
+        // Fallback: abrir modal vacío para informar detención
+        setDatosResumen({
+          totalEnvios: 0,
+          enviosEntregados: 0,
+          enviosEnTransito: 0,
+          enviosPendientes: 0,
+          porcentajeCompletado: 0,
+          duracionSimulacion: 'No disponible'
+        });
+        setEsSimulacionDetenida(true);
+        setMostrarModalResumen(true);
+      }
+    };
+
+    window.addEventListener('planificador:detenido', handleDetener);
+    return () => window.removeEventListener('planificador:detenido', handleDetener);
   }, []);
 
   // 🔌 WebSocket: Actualizaciones en tiempo real del planificador (manteniendo polling como fallback)
@@ -340,8 +382,7 @@ export default function Mapa() {
               });
             }
             setVuelosCache(prev => {
-              console.log('🔄 [WS] Actualizando cache. Anterior:', prev.length, 'vuelos');
-              console.log('🔄 [WS] Vuelos nuevos del planificador:', vuelosNuevos.length);
+
               // Preferir vuelos inyectados (__deRutaEnvio) sobre los que llegan del planificador
               const ahoraSimulacion = getSimMs();
               const margenSeguridad = 5 * 60 * 1000;
@@ -383,7 +424,7 @@ export default function Mapa() {
                 const vigente = llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
                 if (vigente) resultado.push(v);
               }
-              console.log(`✅ [WS] Cache actualizado: ${resultado.length} vuelos (${resultado.filter(v => v.__deRutaEnvio).length} inyectados)`);
+
               return resultado;
             });
             setRawVuelos(vuelosNuevos);
@@ -396,11 +437,11 @@ export default function Mapa() {
   });
 
   useEffect(() => {
-    if (wsConnected) console.log('🟢 WebSocket conectado', usingSockJS ? '(usando SockJS fallback)' : '(nativo)');
+    if (wsConnected) { }
     if (wsError) {
-      console.log('🔴 WebSocket error:', wsError);
+
       if (wsError.includes('backend no actualizado')) {
-        console.log('💡 Solución: Reinicia el backend Spring Boot para cargar el endpoint /ws-planificacion-sockjs');
+
       }
     }
   }, [wsConnected, wsError, usingSockJS]);
@@ -480,8 +521,7 @@ export default function Mapa() {
 
         // ✅ FUSIONAR: Preservar vuelos del cache que aún están volando
         setVuelosCache(prev => {
-          console.log('🔄 [Polling] Actualizando cache. Anterior:', prev.length, 'vuelos');
-          console.log('🔄 [Polling] Vuelos nuevos del planificador:', vuelosNuevos.length);
+
           // Nueva lógica: Reemplazar vuelos planificador por inyectados si existen con mismo id
           const ahoraSimulacion = getSimMs();
           const margenSeguridad = 5 * 60 * 1000;
@@ -522,10 +562,10 @@ export default function Mapa() {
             const vigente = llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
             if (vigente) resultado.push(v);
           }
-          console.log(`✅ [Polling] Cache actualizado: ${resultado.length} vuelos (${resultado.filter(v => v.__deRutaEnvio).length} inyectados)`);
+
           return resultado;
         }); setRawVuelos(vuelosNuevos);
-        console.log('✈️ Vuelos procesados:', vuelosNuevos.length);
+
       } catch (err) {
         console.error("fetch vuelos-ultimo-ciclo:", err);
         if (mounted) setRawVuelos([]);
@@ -542,10 +582,10 @@ export default function Mapa() {
     // Esperar 2 segundos para que WebSocket intente conectar
     const checkTimeout = setTimeout(() => {
       if (!wsConnected) {
-        console.log('⏱️ WebSocket no conectado, activando polling cada 30s como fallback');
+
         iv = setInterval(loadUltimoCiclo, 30_000);
       } else {
-        console.log('✅ WebSocket conectado, polling desactivado');
+
       }
     }, 2000);
 
@@ -579,7 +619,7 @@ export default function Mapa() {
     const realCycleMs = 120_000;                                    // ~ 2 min reales
     if (spanMs > 0) {
       const speed = Math.max(1, Math.round(spanMs / realCycleMs));  // ≈120x
-      console.log('⚡ Estableciendo velocidad de simulación:', speed + 'x');
+
       setSpeed(speed);
       if (!isRunning()) {
         initSim({ startMs: getSimMs(), stepMs: 1000, speed });
@@ -610,11 +650,11 @@ export default function Mapa() {
       // Si la simulación llegó al fin y aún no se detuvo
       if (simMs >= finMs && !yaSeDetuvoRef.current) {
         yaSeDetuvoRef.current = true;
-        console.log('🎯 Simulación finalizada - Generando resumen...');
+
 
         try {
-          // Detener simulación en el backend
-          const detenerRes = await fetch(`${API_BASE}/api/simulacion/detener`, {
+          // Detener simulación en el backend (endpoint correcto)
+          const detenerRes = await fetch(`${API_BASE}/api/planificador/detener`, {
             method: "POST",
             headers: { "Content-Type": "application/json" }
           });
@@ -627,49 +667,50 @@ export default function Mapa() {
           setVuelosCache([]);
           setRawVuelos([]);
           setLocalAirportCapacities({}); // Resetear capacidades locales
-          console.log('🧹 Caché de vuelos y capacidades limpiado al finalizar simulación');
 
-          // Obtener estadísticas de envíos desde el backend
-          const enviosRes = await fetch(`${API_BASE}/api/envios/obtenerTodos`);
-          if (enviosRes.ok) {
-            const envios = await enviosRes.json();
-            const enviosArray = Array.isArray(envios) ? envios : [];
 
-            // Filtrar envíos entregados (estado ENTREGADO o estado 3)
-            const entregados = enviosArray.filter(e =>
-              e.estado === 'ENTREGADO' ||
-              e.estado === 3 ||
-              e.estadoEnvio?.nombre === 'ENTREGADO' ||
-              e.estadoEnvio?.id === 3
-            );
+          // Obtener resumen de planificación desde el backend
+          try {
+            const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+            if (resumenRes.ok) {
+              const resumen = await resumenRes.json();
 
-            // Calcular total de productos (suma de cantidades)
-            const totalProductos = entregados.reduce((sum, e) => {
-              const cantidad = e.cantidad ?? e.cantidadProductos ?? e.numeroProductos ?? 1;
-              return sum + cantidad;
-            }, 0);
+              console.log('📊 Resumen de planificación:', resumen);
 
-            // Calcular tiempo de simulación
-            const tiempoSimulacion = finMs - ini.getTime();
-
+              // Mostrar modal de resumen
+              setDatosResumen(resumen);
+              setEsSimulacionDetenida(false);
+              setMostrarModalResumen(true);
+            } else {
+              console.warn('⚠️ Error al obtener resumen:', resumenRes.status);
+              // Fallback: abrir modal con datos mínimos si el backend no responde
+              setDatosResumen({
+                totalEnvios: 0,
+                enviosEntregados: 0,
+                enviosEnTransito: 0,
+                enviosPendientes: 0,
+                porcentajeCompletado: 0,
+                duracionSimulacion: 'No disponible'
+              });
+              setEsSimulacionDetenida(false);
+              setMostrarModalResumen(true);
+            }
+          } catch (error) {
+            console.error('❌ Error al obtener resumen de planificación:', error);
+            // Fallback: abrir modal aún si falla el resumen
             setDatosResumen({
-              enviosEntregados: entregados.length,
-              productosEntregados: totalProductos,
-              tiempoSimulacion
+              totalEnvios: 0,
+              enviosEntregados: 0,
+              enviosEnTransito: 0,
+              enviosPendientes: 0,
+              porcentajeCompletado: 0,
+              duracionSimulacion: 'No disponible'
             });
-
-            setMostrarResumen(true);
-
-            console.log('📊 Resumen generado:', {
-              envios: entregados.length,
-              productos: totalProductos,
-              tiempo: tiempoSimulacion
-            });
-          } else {
-            console.warn('⚠️ Error al obtener envíos:', enviosRes.status);
+            setEsSimulacionDetenida(false);
+            setMostrarModalResumen(true);
           }
         } catch (error) {
-          console.error('❌ Error al generar resumen:', error);
+          console.error('❌ Error al procesar fin de simulación:', error);
         }
       }
     };
@@ -684,17 +725,9 @@ export default function Mapa() {
       yaSeDetuvoRef.current = false;
       fechaInicioSimRef.current = null;
       fechaFinSimRef.current = null;
-      setMostrarResumen(false);
-    } else {
-      // Si la simulación se detiene (manualmente o por error), limpiar caché y capacidades
-      setVuelosCache([]);
-      setRawVuelos([]);
-      setLocalAirportCapacities({}); // Resetear capacidades locales
-      console.log('🧹 Caché de vuelos y capacidades limpiado al detener simulación');
+      wasRunningRef.current = true;
     }
-  }, [horizonte?.inicio]); // Cuando cambia el horizonte, es una nueva simulación
-
-  // ✅ Aeropuertos base (sin capacidades dinámicas calculadas)
+  }, [horizonte?.inicio, nowMs]); // ← Solo resetear estado cuando inicia  // ✅ Aeropuertos base (sin capacidades dinámicas calculadas)
   // Detectar aeropuertos principales (ilimitados): Lima, Bruselas, Bakú
   const esAeropuertoPrincipal = useCallback((a) => {
     const ciudad = String(a.ciudad ?? a.raw?.ciudad ?? "").toLowerCase();
@@ -2000,13 +2033,12 @@ export default function Mapa() {
         </MapContainer>
       )}
 
-      {/* 🎯 Modal de resumen de simulación */}
-      <ResumenSimulacion
-        isOpen={mostrarResumen}
-        onClose={() => setMostrarResumen(false)}
-        enviosEntregados={datosResumen.enviosEntregados}
-        productosEntregados={datosResumen.productosEntregados}
-        tiempoSimulacion={datosResumen.tiempoSimulacion}
+      {/* Modal de resumen de simulación */}
+      <ModalResumen
+        isOpen={mostrarModalResumen}
+        onClose={() => setMostrarModalResumen(false)}
+        resumen={datosResumen}
+        esDetenida={esSimulacionDetenida}
       />
     </div>
   );
