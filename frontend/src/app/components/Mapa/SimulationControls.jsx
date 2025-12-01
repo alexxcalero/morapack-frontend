@@ -40,7 +40,7 @@ export default function SimulationControls({ startStr = null }) {
     // Usar endpoint ligero para polling frecuente (evita cargar 43K+ envíos)
     const fetchEstado = async () => {
         try {
-            const r = await fetch(`${API_BASE}/api/planificador/estado-simple`);
+            const res = await fetch(`${API_BASE}/api/planificador/estado-simple`);
             const json = await res.json();
             setEstado({
                 activo: Boolean(json?.planificadorActivo),
@@ -83,11 +83,23 @@ export default function SimulationControls({ startStr = null }) {
         setIniciando(true); // ← no bloquea la UI global, solo el botón
         console.log(`🚀 [FRONTEND] Iniciando simulación a las ${new Date().toLocaleTimeString()}`);
         try {
-            // Limpiar la simulación anterior SIN esperar (fire-and-forget)
-            // La limpieza se ejecuta en paralelo para no bloquear
-            fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" })
-                .then(() => console.log('✅ Limpieza completada'))
-                .catch(err => console.warn('⚠️ Error en limpieza (no crítico):', err));
+            // ⚡ IMPORTANTE: Esperar a que la limpieza termine ANTES de iniciar
+            // Esto asegura que los envíos estén en estado NULL y disponibles
+            console.log('🧹 [FRONTEND] Limpiando planificación anterior...');
+            try {
+                const limpiarRes = await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
+                if (limpiarRes.ok) {
+                    const limpiarData = await limpiarRes.json();
+                    console.log('✅ Limpieza completada:', limpiarData);
+                } else {
+                    console.warn('⚠️ Error en limpieza, continuando de todos modos...');
+                }
+            } catch (err) {
+                console.warn('⚠️ Error en limpieza (no crítico):', err);
+            }
+
+            // Pequeña pausa para asegurar que la BD se sincronice
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             // Parsear fecha como hora local
             const [datePart, timePart] = fechaInicio.split('T');
@@ -137,17 +149,43 @@ export default function SimulationControls({ startStr = null }) {
     };
 
     const detener = async () => {
-        // Emitir evento inmediatamente para limpiar UI aunque el backend tarde o falle
-        try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
+        // Marcar como deteniendo (bloquea el botón)
         setEstado({ activo: false, cargando: true });
+
         try {
+            // Llamar al backend para detener
             await fetch(`${API_BASE}/api/planificador/detener`, { method: "POST" });
+
+            // Esperar un poco para que el backend termine de cancelar eventos
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Verificar que realmente se detuvo (polling hasta confirmar)
+            let intentos = 0;
+            const maxIntentos = 10;
+            while (intentos < maxIntentos) {
+                try {
+                    const res = await fetch(`${API_BASE}/api/planificador/estado-simple`);
+                    const json = await res.json();
+                    if (!json?.planificadorActivo) {
+                        console.log('✅ Backend confirmó detención');
+                        break;
+                    }
+                    console.log(`⏳ Esperando detención... intento ${intentos + 1}/${maxIntentos}`);
+                } catch { }
+                await new Promise(resolve => setTimeout(resolve, 500));
+                intentos++;
+            }
+
+            // Ahora sí emitir evento de detención (después de confirmar)
+            try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
+
         } catch (error) {
             console.error('Error al detener:', error);
+            // Aún así emitir evento para limpiar UI
+            try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
         } finally {
-            // Quitar el spinner y refrescar estado vía polling
-            setEstado(s => ({ ...s, cargando: false }));
-            setTimeout(fetchEstado, 500);
+            // Actualizar estado final
+            setEstado({ activo: false, cargando: false });
         }
     };
 
@@ -219,15 +257,15 @@ export default function SimulationControls({ startStr = null }) {
             <button
                 type="button"
                 onClick={iniciar}
-                disabled={iniciando || estado.activo || !fechaInicio}
+                disabled={iniciando || estado.activo || estado.cargando || !fechaInicio}
                 style={{
                     ...btnStyle,
                     border: "none",
-                    background: estado.activo || !fechaInicio || iniciando ? "#94a3b8" : "#3b82f6",
+                    background: estado.activo || !fechaInicio || iniciando || estado.cargando ? "#94a3b8" : "#3b82f6",
                     color: "white",
-                    cursor: estado.activo || !fechaInicio || iniciando ? "not-allowed" : "pointer",
+                    cursor: estado.activo || !fechaInicio || iniciando || estado.cargando ? "not-allowed" : "pointer",
                 }}
-                title={estado.activo ? "Simulación en ejecución - Detén primero para reiniciar" : !fechaInicio ? "Ingresa fecha de inicio" : "Iniciar planificador"}
+                title={estado.cargando ? "Espera a que se detenga" : estado.activo ? "Simulación en ejecución - Detén primero para reiniciar" : !fechaInicio ? "Ingresa fecha de inicio" : "Iniciar planificador"}
             >
                 {iniciando ? "Iniciando..." : estado.activo ? "En ejecución" : "Iniciar"}
             </button>
@@ -239,12 +277,13 @@ export default function SimulationControls({ startStr = null }) {
                 style={{
                     ...btnStyle,
                     border: "none",
-                    background: !estado.activo ? "#94a3b8" : "#6b7280",
+                    background: estado.cargando ? "#f59e0b" : !estado.activo ? "#94a3b8" : "#6b7280",
                     color: "white",
+                    cursor: estado.cargando ? "wait" : "pointer",
                 }}
-                title={!estado.activo ? "No está en ejecución" : "Detener planificador"}
+                title={estado.cargando ? "Deteniendo simulación..." : !estado.activo ? "No está en ejecución" : "Detener planificador"}
             >
-                {estado.cargando ? "..." : "■ Detener"}
+                {estado.cargando ? "⏳ Deteniendo..." : "■ Detener"}
             </button>
         </div>
     );

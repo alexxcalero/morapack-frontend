@@ -34,102 +34,90 @@ export default function HoraActual({ simulacionIniciada = false }) {
   const [realElapsed, setRealElapsed] = useState(0);
   const [simElapsed, setSimElapsed] = useState(0);
   const [activo, setActivo] = useState(false);
-  const [contadoresActivados, setContadoresActivados] = useState(false);
 
   const realStartRef = useRef(null);
   const simStartRef = useRef(null);
   const rafRef = useRef(null);
-  const lastSimMsRef = useRef(null);
-  const contadoresActivadosRef = useRef(false); // ← Ref para acceder en RAF loop
+  const inicializadoRef = useRef(false);
 
-  // Activar contadores cuando la simulación realmente inicia (después del auto-avance)
+  // ✅ SIMPLIFICADO: Activar contadores cuando simulacionIniciada cambia a true
   useEffect(() => {
-    console.log('🔍 Verificando activación de contadores:', {
-      simulacionIniciada,
-      activo,
-      contadoresActivados
-    });
+    if (simulacionIniciada && !inicializadoRef.current) {
+      // Esperar un momento para que simTime tenga datos válidos
+      const timer = setTimeout(() => {
+        const ms = getSimMs();
+        console.log('✅ Inicializando contadores - simMs:', ms, new Date(ms).toISOString());
+        realStartRef.current = Date.now();
+        simStartRef.current = ms;
+        setRealElapsed(0);
+        setSimElapsed(0);
+        setSimNow(new Date(ms));
+        setActivo(true);
+        inicializadoRef.current = true;
+      }, 500); // Pequeño delay para asegurar que simTime está listo
 
-    if (simulacionIniciada && activo && !contadoresActivados) {
-      const ms = getSimMs();
-      realStartRef.current = Date.now();
-      simStartRef.current = ms;
+      return () => clearTimeout(timer);
+    }
+
+    if (!simulacionIniciada) {
+      // Reset cuando se detiene
+      inicializadoRef.current = false;
+      setActivo(false);
+      setSimNow(null);
       setRealElapsed(0);
       setSimElapsed(0);
-      setSimNow(new Date(ms)); // Mostrar fecha/hora simulada AHORA
-      setContadoresActivados(true);
-      contadoresActivadosRef.current = true; // ← Actualizar el ref también
-      console.log('✅ Contadores activados - simStart:', ms, new Date(ms).toISOString());
     }
-  }, [simulacionIniciada, activo]); // ← Quitar contadoresActivados de las dependencias
+  }, [simulacionIniciada]);
 
-  // Resetear contadores cuando cambia la simulación
+  // Suscribirse a cambios en simTime para detectar saltos (auto-avance)
   useEffect(() => {
-    if (!activo) {
-      setContadoresActivados(false);
-      contadoresActivadosRef.current = false; // ← Resetear el ref también
-    }
-  }, [activo]);
+    let lastMs = null;
 
-  // Suscribirse a cambios en simTime para detectar reinicios
-  useEffect(() => {
     const unsub = subscribe((newSimMs) => {
-      // Detectar un salto grande en el tiempo (reinicio de simulación)
-      if (lastSimMsRef.current != null && activo) {
-        const diff = Math.abs(newSimMs - lastSimMsRef.current);
-        // Si hay un salto mayor a 1 hora, es el auto-avance
-        if (diff > 3600000) {
-          console.log('🔄 Reinicio detectado en simTime - Nuevo inicio:', newSimMs, new Date(newSimMs).toISOString());
-
-          // Si no están activados los contadores, activarlos ahora (es el auto-avance inicial)
-          if (!contadoresActivadosRef.current) {
-            realStartRef.current = Date.now();
-            simStartRef.current = newSimMs;
-            setRealElapsed(0);
-            setSimElapsed(0);
-            setSimNow(new Date(newSimMs));
-            setContadoresActivados(true);
-            contadoresActivadosRef.current = true; // ← Actualizar el ref también
-            console.log('✅ Contadores activados por auto-avance - simStart:', newSimMs, new Date(newSimMs).toISOString());
-          } else {
-            // Si ya están activados, solo reiniciar el punto de inicio
-            simStartRef.current = newSimMs;
-            setSimElapsed(0);
-          }
+      // Detectar salto grande (auto-avance inicial)
+      if (lastMs != null && inicializadoRef.current) {
+        const diff = Math.abs(newSimMs - lastMs);
+        if (diff > 3600000) { // > 1 hora = salto
+          console.log('🔄 Salto detectado - reiniciando simStart:', newSimMs);
+          simStartRef.current = newSimMs;
+          setSimElapsed(0);
         }
       }
-      lastSimMsRef.current = newSimMs;
+      lastMs = newSimMs;
     });
-    return unsub;
-  }, [activo]);
 
-  // Poll estado planificador (usando endpoint ligero para evitar cargar 43K+ envíos)
+    return unsub;
+  }, []);
+
+  // Poll estado planificador (backup)
   const fetchEstado = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/api/planificador/estado-simple`);
       const j = await r.json();
       const nuevoActivo = !!j?.planificadorActivo;
 
-      setActivo(prev => {
-        if (prev !== nuevoActivo) {
-          if (nuevoActivo) {
-            // inicio simulación - NO inicializar contadores aún, esperar auto-avance
-            const ms = getSimMs();
-            console.log('⏰ Simulación backend iniciada - Esperando auto-avance...');
-            // ✅ CRÍTICO: Asegurar que el ticker de simTime está corriendo
-            if (!isRunning()) {
-              const speed = getSpeed() || 1;
-              initSim({ startMs: ms, stepMs: 1000, speed });
-              console.log('⏰ Ticker de simulación iniciado - speed:', speed);
-            }
-          } else {
-            // Detener: resetear contadores y limpiar simNow
-            setContadoresActivados(false);
-            setSimNow(null);
-          }
+      // Si el backend dice activo pero no hemos inicializado, hacerlo ahora
+      if (nuevoActivo && !inicializadoRef.current) {
+        const ms = getSimMs();
+        console.log('✅ Inicializando contadores desde polling - simMs:', ms);
+        realStartRef.current = Date.now();
+        simStartRef.current = ms;
+        setRealElapsed(0);
+        setSimElapsed(0);
+        setSimNow(new Date(ms));
+        setActivo(true);
+        inicializadoRef.current = true;
+
+        // Asegurar que el ticker está corriendo
+        if (!isRunning()) {
+          const speed = getSpeed() || 1;
+          initSim({ startMs: ms, stepMs: 1000, speed });
         }
-        return nuevoActivo;
-      });
+      } else if (!nuevoActivo && inicializadoRef.current) {
+        // Backend inactivo - resetear
+        inicializadoRef.current = false;
+        setActivo(false);
+      }
     } catch { /* ignorar */ }
   }, []);
 
@@ -139,29 +127,19 @@ export default function HoraActual({ simulacionIniciada = false }) {
     return () => clearInterval(iv);
   }, [fetchEstado]);
 
-  // Reloj real suave
+  // Reloj que actualiza todos los valores
   useEffect(() => {
     const tick = () => {
       const nowRealMs = Date.now();
-      // actualizar real cada frame (suave)
       setRealNow(new Date(nowRealMs));
 
-      // Mostrar hora simulada SOLO si los contadores están activados
-      const simMs = getSimMs();
-      if (contadoresActivadosRef.current) { // ← Usar el ref en lugar del estado
+      if (inicializadoRef.current) {
+        const simMs = getSimMs();
         setSimNow(new Date(simMs));
 
-        // Calcular transcurrido sim
         if (simStartRef.current != null) {
-          const elapsed = simMs - simStartRef.current;
-          setSimElapsed(elapsed);
-          // Log para debug cada 5 segundos
-          if (Math.floor(nowRealMs / 5000) !== Math.floor((nowRealMs - 16) / 5000)) {
-            console.log('⏱️ simMs:', simMs, 'simStart:', simStartRef.current, 'elapsed:', elapsed, 'formatted:', fmtElapsed(elapsed));
-          }
+          setSimElapsed(simMs - simStartRef.current);
         }
-
-        // El transcurrido real solo avanza cuando activo y contadores activados
         if (realStartRef.current != null) {
           setRealElapsed(nowRealMs - realStartRef.current);
         }
@@ -176,7 +154,7 @@ export default function HoraActual({ simulacionIniciada = false }) {
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, []); // ← Sin dependencias, solo se ejecuta una vez
+  }, []);
 
   const box = {
     display: "flex",
