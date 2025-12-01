@@ -20,6 +20,48 @@ import { obtenerRutasEnvio, obtenerEnviosPendientes } from "../../../lib/envios"
 // URL base del backend (misma usada en SimulationControls)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
+/**
+ * Calcula la duración de la simulación en formato legible
+ * @param {string|null} fechaInicio - Fecha de inicio ISO
+ * @param {string|null} fechaFin - Fecha de fin ISO
+ * @param {number|null} cicloActual - Número de ciclos completados
+ * @returns {string} Duración formateada (ej: "5 días 3 horas" o "12 horas 30 min")
+ */
+function calcularDuracionSimulacion(fechaInicio, fechaFin, cicloActual) {
+  // Intentar calcular con fechas
+  if (fechaInicio && fechaFin) {
+    try {
+      const inicio = new Date(fechaInicio);
+      const fin = new Date(fechaFin);
+      if (!isNaN(inicio.getTime()) && !isNaN(fin.getTime())) {
+        const diffMs = fin.getTime() - inicio.getTime();
+        if (diffMs > 0) {
+          const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const minutos = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+          if (dias > 0) {
+            return `${dias} día${dias !== 1 ? 's' : ''} ${horas} hora${horas !== 1 ? 's' : ''}`;
+          } else if (horas > 0) {
+            return `${horas} hora${horas !== 1 ? 's' : ''} ${minutos} min`;
+          } else {
+            return `${minutos} minuto${minutos !== 1 ? 's' : ''}`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error parseando fechas de simulación:', e);
+    }
+  }
+
+  // Fallback a ciclos
+  if (cicloActual && cicloActual > 0) {
+    return `${cicloActual} ciclo${cicloActual !== 1 ? 's' : ''}`;
+  }
+
+  return 'N/A';
+}
+
 // ⚡ OPTIMIZACIÓN: Usar Canvas renderer para mejor performance con muchos elementos
 const canvasRenderer = L.canvas({ padding: 0.5, tolerance: 10 });
 
@@ -73,8 +115,27 @@ function parseDMSString(s) {
   return Math.abs(deg) + min / 60 + sec / 3600;
 }
 function containsDirectionLetter(str) { if (!str) return null; const m = String(str).match(/[NnSsEeWw]/); return m ? m[0].toUpperCase() : null; }
+// Países con latitud NEGATIVA (hemisferio sur)
 const southCountries = new Set(["peru", "perú", "chile", "argentina", "uruguay", "paraguay", "bolivia", "brasil", "brazil", "ecuador"]);
+// Países de América (longitud NEGATIVA - hemisferio occidental)
+const americaCountries = new Set(["peru", "perú", "chile", "argentina", "uruguay", "paraguay", "bolivia", "brasil", "brazil", "ecuador", "colombia", "venezuela", "mexico", "méxico"]);
 function normalizeCountryName(name) { if (!name) return ""; return String(name).trim().toLowerCase(); }
+
+// ⚡ Detectar si un aeropuerto está en América (longitud debe ser negativa)
+function isInAmerica(airport) {
+  const continentId = airport?.pais?.continente?.id ?? airport?.continentId ?? null;
+  const continentName = String(airport?.pais?.continente?.nombre ?? airport?.continentName ?? "").toLowerCase();
+  const countryName = normalizeCountryName(airport?.pais?.nombre ?? airport?.country ?? "");
+
+  // Detectar por ID de continente (América = 1)
+  if (continentId === 1) return true;
+  // Detectar por nombre de continente
+  if (continentName.includes("america") || continentName.includes("américa")) return true;
+  // Detectar por nombre de país
+  if (americaCountries.has(countryName)) return true;
+
+  return false;
+}
 
 function parseCoord(raw, { isLat = false, airport = null } = {}) {
   if (raw == null) return NaN;
@@ -93,24 +154,28 @@ function parseCoord(raw, { isLat = false, airport = null } = {}) {
     const hasSign = /^[+\-]/.test(str.trim());
     if (hasSign) return maybeNumeric;
     const countryName = normalizeCountryName(airport?.pais?.nombre ?? airport?.country ?? "");
-    const continentId = airport?.pais?.continente?.id ?? airport?.continentId ?? null;
     if (!isLat) {
-      if (continentId === 1 || String(countryName).includes("america")) return -Math.abs(maybeNumeric);
+      // Longitud: América debe ser negativa
+      if (isInAmerica(airport)) return -Math.abs(maybeNumeric);
       return maybeNumeric;
     }
     if (isLat) {
+      // Latitud: países del sur deben ser negativos
       if (southCountries.has(countryName)) return -Math.abs(maybeNumeric);
       return maybeNumeric;
     }
   }
+  // Formato DMS: "10-36-11" o "10 36 11"
   if (/[0-9]+-[0-9]+(-[0-9]+)?/.test(str) || /[0-9]+\s+[0-9]+/.test(str)) {
     const dec = parseDMSString(str);
     if (Number.isNaN(dec)) return NaN;
     const countryName = normalizeCountryName(airport?.pais?.nombre ?? airport?.country ?? "");
     if (!isLat) {
-      if (airport?.pais?.continente?.id === 1 || String(countryName).includes("america")) return -Math.abs(dec);
+      // Longitud: América debe ser negativa
+      if (isInAmerica(airport)) return -Math.abs(dec);
       return dec;
     } else {
+      // Latitud: países del sur deben ser negativos
       if (southCountries.has(countryName)) return -Math.abs(dec);
       return dec;
     }
@@ -316,11 +381,34 @@ export default function Mapa() {
       try {
         const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
         if (resumenRes.ok) {
-          const resumen = await resumenRes.json();
-          console.log('📊 Resumen de planificación al detener:', resumen);
+          const data = await resumenRes.json();
+          console.log('📊 Resumen de planificación al detener:', data);
+
+          // Transformar datos del backend al formato que espera el modal
+          const statsPedidos = data.estadisticasPedidos || {};
+          const statsPorEstado = data.estadisticasPorEstado || {};
+          const infoGeneral = data.informacionGeneral || {};
+
+          const resumenFormateado = {
+            totalEnvios: statsPedidos.totalPedidos || 0,
+            enviosEntregados: statsPorEstado.enviosEntregados || 0,
+            enviosEnTransito: statsPorEstado.enviosEnRuta || 0,
+            enviosPendientes: (statsPorEstado.enviosRegistrados || 0) + (statsPorEstado.enviosPlanificados || 0),
+            porcentajeCompletado: statsPedidos.tasaExito || 0,
+            duracionSimulacion: calcularDuracionSimulacion(
+              infoGeneral.fechaInicio,
+              infoGeneral.fechaFin,
+              infoGeneral.cicloActual
+            ),
+            // Datos adicionales del backend
+            pedidosCompletados: statsPedidos.pedidosCompletados || 0,
+            pedidosParciales: statsPedidos.pedidosParciales || 0,
+            enviosPlanificados: statsPorEstado.enviosPlanificados || 0,
+            enviosFinalizados: statsPorEstado.enviosFinalizados || 0,
+          };
 
           // Mostrar modal de resumen
-          setDatosResumen(resumen);
+          setDatosResumen(resumenFormateado);
           setEsSimulacionDetenida(true);
           setMostrarModalResumen(true);
         }
@@ -673,12 +761,30 @@ export default function Mapa() {
           try {
             const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
             if (resumenRes.ok) {
-              const resumen = await resumenRes.json();
+              const data = await resumenRes.json();
 
-              console.log('📊 Resumen de planificación:', resumen);
+              console.log('📊 Resumen de planificación:', data);
+
+              // Transformar datos del backend al formato que espera el modal
+              const statsPedidos = data.estadisticasPedidos || {};
+              const statsPorEstado = data.estadisticasPorEstado || {};
+              const infoGeneral = data.informacionGeneral || {};
+
+              const resumenFormateado = {
+                totalEnvios: statsPedidos.totalPedidos || 0,
+                enviosEntregados: statsPorEstado.enviosEntregados || 0,
+                enviosEnTransito: statsPorEstado.enviosEnRuta || 0,
+                enviosPendientes: (statsPorEstado.enviosRegistrados || 0) + (statsPorEstado.enviosPlanificados || 0),
+                porcentajeCompletado: statsPedidos.tasaExito || 0,
+                duracionSimulacion: calcularDuracionSimulacion(
+                  infoGeneral.fechaInicio,
+                  infoGeneral.fechaFin,
+                  infoGeneral.cicloActual
+                ),
+              };
 
               // Mostrar modal de resumen
-              setDatosResumen(resumen);
+              setDatosResumen(resumenFormateado);
               setEsSimulacionDetenida(false);
               setMostrarModalResumen(true);
             } else {
@@ -800,11 +906,30 @@ export default function Mapa() {
       const origenAirport = p.origen?.id && airportsById[p.origen.id] ? airportsById[p.origen.id] : null;
       const destinoAirport = p.destino?.id && airportsById[p.destino.id] ? airportsById[p.destino.id] : null;
 
+      // ⚠️ DEBUG: Detectar vuelos sin aeropuerto válido
+      if (!origenAirport && p.origen?.id) {
+        console.warn(`⚠️ Vuelo ${p.id}: Origen ID ${p.origen.id} (${p.origen?.ciudad}) NO encontrado en airportsById`);
+      }
+      if (!destinoAirport && p.destino?.id) {
+        console.warn(`⚠️ Vuelo ${p.id}: Destino ID ${p.destino.id} (${p.destino?.ciudad}) NO encontrado en airportsById`);
+      }
+
       // Para vuelos inyectados desde rutas, las coordenadas ya vienen parseadas
       const latOrigen = p.__deRutaEnvio && Number.isFinite(p.latOrigen) ? p.latOrigen : origenAirport?.lat;
       const lonOrigen = p.__deRutaEnvio && Number.isFinite(p.lonOrigen) ? p.lonOrigen : origenAirport?.lon;
       const latDestino = p.__deRutaEnvio && Number.isFinite(p.latDestino) ? p.latDestino : destinoAirport?.lat;
       const lonDestino = p.__deRutaEnvio && Number.isFinite(p.lonDestino) ? p.lonDestino : destinoAirport?.lon;
+
+      // ⚠️ DEBUG: Detectar coordenadas inválidas o intercambiadas
+      if (origenAirport && destinoAirport) {
+        // Verificar si lat/lon parecen intercambiadas (lat fuera de rango -90 a 90)
+        if (Math.abs(latOrigen) > 90 || Math.abs(latDestino) > 90) {
+          console.error(`🚨 Vuelo ${p.id}: Coordenadas posiblemente intercambiadas!`, {
+            origen: { ciudad: p.origen?.ciudad, lat: latOrigen, lon: lonOrigen },
+            destino: { ciudad: p.destino?.ciudad, lat: latDestino, lon: lonDestino }
+          });
+        }
+      }
 
       // horas estilo "yyyy-MM-dd HH:mm (UTC±hh:mm)"
       const horaOrigen = parsePlanificadorTime(p.horaSalida) || null;
@@ -829,7 +954,9 @@ export default function Mapa() {
         latOrigen, lonOrigen, latDestino, lonDestino,
         horaOrigen, horaDestino,
         ciudadOrigenId: p.origen?.id, ciudadDestinoId: p.destino?.id,
-        ciudadOrigenName: p.origen?.ciudad, ciudadDestinoName: p.destino?.ciudad,
+        // ⚠️ Fallback: si no hay ciudad en origen/destino, buscar en airportsById
+        ciudadOrigenName: p.origen?.ciudad || (p.origen?.id && airportsById[p.origen.id]?.ciudad) || p.ciudadOrigen || null,
+        ciudadDestinoName: p.destino?.ciudad || (p.destino?.id && airportsById[p.destino.id]?.ciudad) || p.ciudadDestino || null,
         __deRutaEnvio: p.__deRutaEnvio || false
       };
     }).filter(v =>
@@ -894,7 +1021,18 @@ export default function Mapa() {
     if (!Array.isArray(vuelos)) return [];
     const ahoraMs = throttledNowMs;
     const BUFFER_MS = 2 * 60 * 1000; // 2 minutos extra tras llegada
-    const list = vuelos.map(v => {
+
+    // ⚠️ DEDUPLICAR por idTramo para evitar keys duplicadas en React
+    const vuelosUnicos = new Map();
+    for (const v of vuelos) {
+      const id = v.idTramo;
+      // Preferir vuelos inyectados (__deRutaEnvio) sobre los del planificador
+      if (!vuelosUnicos.has(id) || v.__deRutaEnvio) {
+        vuelosUnicos.set(id, v);
+      }
+    }
+
+    const list = Array.from(vuelosUnicos.values()).map(v => {
       if (!(v.horaOrigen instanceof Date) || !(v.horaDestino instanceof Date)) return null;
       if (ahoraMs < v.horaOrigen.getTime()) return null;
       // Permitir que el vuelo siga visible hasta 2 minutos después de la llegada
@@ -1033,6 +1171,10 @@ export default function Mapa() {
     if (vuelosFuturos.length === 0) {
       console.log('⚠️ No hay vuelos futuros dentro del horizonte para hacer auto-avance');
       autoAvanceEjecutadoRef.current = true;
+      // ✅ IMPORTANTE: Activar simulacionIniciada aunque no haya auto-avance
+      // porque el horizonte ya está definido y el planificador está corriendo
+      console.log('🚀 Activando simulacionIniciada = true (sin auto-avance, horizonte ya es actual)');
+      setSimulacionIniciada(true);
       return;
     }
 
@@ -1197,13 +1339,104 @@ export default function Mapa() {
   }, [vuelos, vuelosCache, handleSelectVuelo]);
 
   // Callback para cuando se cargan envíos con rutas
-  const handleEnviosLoaded = useCallback((enviosList) => {
-    console.log('🎬 handleEnviosLoaded llamado con', enviosList?.length, 'envíos');
+  // ✈️ Ahora también puede recibir vuelos pre-procesados del endpoint /obtenerPlanificadosConRutas
+  const handleEnviosLoaded = useCallback((enviosList, vuelosPrecargados = null) => {
+    console.log('🎬 handleEnviosLoaded llamado con', enviosList?.length, 'envíos', vuelosPrecargados?.length || 0, 'vuelos precargados');
     if (!Array.isArray(enviosList) || enviosList.length === 0) {
       console.log('⚠️ handleEnviosLoaded: lista vacía o inválida');
       return;
     }
 
+    // ✈️ Si recibimos vuelos pre-procesados del backend, usarlos directamente
+    if (Array.isArray(vuelosPrecargados) && vuelosPrecargados.length > 0) {
+      console.log(`✈️ Inyectando ${vuelosPrecargados.length} vuelos precargados del endpoint`);
+
+      setVuelosCache(prev => {
+        const idsExistentes = new Set(prev.map(v => v.id || v.idTramo));
+        const nuevos = [];
+
+        for (const v of vuelosPrecargados) {
+          if (idsExistentes.has(v.id)) continue;
+
+          // Buscar aeropuertos para coordenadas (ya tienen lat/lon parseados)
+          const origenApt = v.ciudadOrigen?.id ? airportsById[v.ciudadOrigen.id] : null;
+          const destinoApt = v.ciudadDestino?.id ? airportsById[v.ciudadDestino.id] : null;
+
+          // ⚡ Usar coordenadas ya parseadas de airportsById (tienen lat/lon)
+          // Solo usar parseCoord si no están disponibles
+          let latOrigen = origenApt?.lat;
+          let lonOrigen = origenApt?.lon;
+          let latDestino = destinoApt?.lat;
+          let lonDestino = destinoApt?.lon;
+
+          // Fallback: parsear si no hay coordenadas pre-parseadas
+          if (!Number.isFinite(latOrigen)) {
+            latOrigen = parseCoord(v.ciudadOrigen?.latitud || origenApt?.raw?.latitud, { isLat: true, airport: origenApt?.raw || origenApt });
+          }
+          if (!Number.isFinite(lonOrigen)) {
+            lonOrigen = parseCoord(v.ciudadOrigen?.longitud || origenApt?.raw?.longitud, { isLat: false, airport: origenApt?.raw || origenApt });
+          }
+          if (!Number.isFinite(latDestino)) {
+            latDestino = parseCoord(v.ciudadDestino?.latitud || destinoApt?.raw?.latitud, { isLat: true, airport: destinoApt?.raw || destinoApt });
+          }
+          if (!Number.isFinite(lonDestino)) {
+            lonDestino = parseCoord(v.ciudadDestino?.longitud || destinoApt?.raw?.longitud, { isLat: false, airport: destinoApt?.raw || destinoApt });
+          }
+
+          // Validar coordenadas antes de agregar
+          if (!Number.isFinite(latOrigen) || !Number.isFinite(lonOrigen) ||
+            !Number.isFinite(latDestino) || !Number.isFinite(lonDestino)) {
+            console.warn(`⚠️ Vuelo ${v.id} omitido: coordenadas inválidas`, { latOrigen, lonOrigen, latDestino, lonDestino, origenApt, destinoApt });
+            continue;
+          }
+
+          const origenObj = {
+            id: v.ciudadOrigen?.id,
+            ciudad: v.ciudadOrigen?.ciudad || origenApt?.ciudad || v.ciudadOrigen?.codigo,
+            codigo: v.ciudadOrigen?.codigo || origenApt?.codigo
+          };
+          const destinoObj = {
+            id: v.ciudadDestino?.id,
+            ciudad: v.ciudadDestino?.ciudad || destinoApt?.ciudad || v.ciudadDestino?.codigo,
+            codigo: v.ciudadDestino?.codigo || destinoApt?.codigo
+          };
+
+          nuevos.push({
+            id: v.id,
+            idTramo: v.id,
+            vueloBaseId: v.id,
+            origen: origenObj,
+            destino: destinoObj,
+            horaSalida: v.horaSalidaStr || (v.horaSalida instanceof Date ? v.horaSalida.toISOString().slice(0, 16).replace('T', ' ') + ' (UTC+00:00)' : null),
+            horaLlegada: v.horaLlegadaStr || (v.horaLlegada instanceof Date ? v.horaLlegada.toISOString().slice(0, 16).replace('T', ' ') + ' (UTC+00:00)' : null),
+            latOrigen,
+            lonOrigen,
+            latDestino,
+            lonDestino,
+            capacidadMaxima: 300,
+            capacidadOcupada: v.cantidad || 0,
+            enviosAsignados: [{
+              envioId: v.envioId,
+              id: v.envioId,
+              cantidad: v.cantidad,
+              cantidadAsignada: v.cantidad
+            }],
+            __deRutaEnvio: true,
+            __historialEnviosCompletos: [],
+            __tuvoEnvios: true
+          });
+        }
+
+        if (nuevos.length > 0) {
+          console.log(`📦 Inyectando ${nuevos.length} vuelos nuevos desde endpoint`);
+          return [...prev, ...nuevos];
+        }
+        return prev;
+      });
+      return;
+    }
+
+    // Fallback: procesar envíos manualmente (lógica original)
     // Mapear envíos planificados por ID de vuelo
     const planificadosPorVuelo = new Map(); // vueloId -> array de envíos resumidos
     for (const envio of enviosList) {
@@ -1414,6 +1647,7 @@ export default function Mapa() {
 
   // 🆕 Inyección automática de vuelos desde rutas de envíos (ahora después de definir handleEnviosLoaded)
   // ⚠️ CAMBIO: No usar ref, sino verificar si hay vuelos inyectados en el cache
+  // ⚠️ IMPORTANTE: Solo inyectar si el planificador está ACTIVO
   useEffect(() => {
     if (!airportsById || Object.keys(airportsById).length === 0) {
       console.log('⏳ Esperando que aeropuertos estén listos...');
@@ -1433,10 +1667,23 @@ export default function Mapa() {
       return;
     }
 
-    console.log('🚀 No hay vuelos inyectados en cache, iniciando inyección automática...');
+    console.log('🚀 No hay vuelos inyectados en cache, verificando si planificador está activo...');
 
     (async () => {
       try {
+        // ⚠️ PRIMERO verificar si el planificador está activo
+        const estadoRes = await fetch(`${API_BASE}/api/planificador/estado-simple`);
+        if (!estadoRes.ok) {
+          console.log('⚠️ No se pudo obtener estado del planificador, cancelando inyección');
+          return;
+        }
+        const estado = await estadoRes.json();
+        if (!estado?.planificadorActivo) {
+          console.log('🛑 Planificador NO está activo, no se inyectarán vuelos');
+          return;
+        }
+        console.log('✅ Planificador activo, procediendo con inyección...');
+
         console.log('📡 Obteniendo envíos pendientes...');
         const pendientes = await obtenerEnviosPendientes();
         console.log(`📦 Envíos obtenidos: ${pendientes?.length || 0}`);
@@ -1548,16 +1795,30 @@ export default function Mapa() {
       vuelosFiltrados.find(x => x.idTramo === vueloSeleccionado) ||
       vuelos.find(x => x.idTramo === vueloSeleccionado);
     if (!v) return null;
+
+    // Validar que las coordenadas de destino existan
+    if (!Number.isFinite(v.latDestino) || !Number.isFinite(v.lonDestino)) {
+      console.warn('⚠️ selectedRuta: coordenadas de destino inválidas', v);
+      return null;
+    }
+
     const pos = calcularPosicion(v, nowMs);
     if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
+
     const positions = greatCirclePoints(pos.lat, pos.lon, v.latDestino, v.lonDestino, 64);
+
+    // Validar que positions tenga al menos 2 puntos antes de acceder
+    if (!Array.isArray(positions) || positions.length < 2) {
+      console.warn('⚠️ selectedRuta: greatCirclePoints retornó array inválido', positions);
+      return null;
+    }
 
     // Calcular rumbo usando el segundo punto de la curva si existe para mayor precisión
     let heading = calcularRumboActual(
       pos.lat,
       pos.lon,
-      positions[1] ? positions[1][0] : v.latDestino,
-      positions[1] ? positions[1][1] : v.lonDestino
+      positions[1][0],
+      positions[1][1]
     );
     heading = aplicarOffsetRotacion(heading);
     return { idTramo: v.idTramo, positions, heading, capacidadMax: v.raw?.capacidadMaxima || 300, capacidadOcupada: v.raw?.capacidadOcupada || 0 };
@@ -1846,6 +2107,9 @@ export default function Mapa() {
             const coloresPorParte = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
             const colorRuta = coloresPorParte[rutaIdx % coloresPorParte.length];
 
+            // Validar que ruta.vuelos exista y sea un array
+            if (!Array.isArray(ruta.vuelos)) return null;
+
             return ruta.vuelos.map((vuelo, vueloIdx) => {
               // Encontrar aeropuertos origen y destino
               const origenAirport = airportsById[vuelo.ciudadOrigen];
@@ -1878,8 +2142,28 @@ export default function Mapa() {
 
           {airports.map(a => {
             const isSelected = aeropuertoSeleccionado === a.id;
+            // Color semáforo según capacidad
+            const pct = a.porcentaje;
+            const colorSemaforo = pct == null ? '#6b7280' : pct <= 60 ? '#10b981' : pct <= 85 ? '#f59e0b' : '#ef4444';
+            const esIlimitado = a.ilimitado === true;
+            
             return (
               <Fragment key={`ap-frag-${a.id}`}>
+                {/* Círculo de fondo con color semáforo */}
+                {!esIlimitado && (
+                  <CircleMarker
+                    key={`ap-bg-${a.id}`}
+                    center={[a.lat, a.lon]}
+                    radius={isSelected ? 12 : 8}
+                    pathOptions={{ 
+                      color: colorSemaforo, 
+                      weight: 2, 
+                      fillColor: colorSemaforo,
+                      fillOpacity: 0.3,
+                      opacity: 0.8
+                    }}
+                  />
+                )}
                 <Marker
                   key={`ap-${a.id}`}
                   position={[a.lat, a.lon]}
@@ -1899,12 +2183,39 @@ export default function Mapa() {
                       padding: '6px 8px',
                       borderRadius: 6,
                       fontSize: 11,
-                      fontWeight: 600
+                      fontWeight: 600,
+                      minWidth: 120
                     }}>
-                      {a.ciudad}{a.codigo ? ` (${a.codigo})` : ""}
-                      {a.porcentaje != null && (
-                        <div style={{ fontSize: 10, marginTop: 2 }}>
-                          {a.capacidadOcupada}/{a.capacidadMaxima} ({a.porcentaje}%)
+                      <div style={{ marginBottom: 4 }}>
+                        {a.ciudad}{a.codigo ? ` (${a.codigo})` : ""}
+                      </div>
+                      {pct != null ? (
+                        <>
+                          <div style={{ fontSize: 10, marginBottom: 4, color: '#64748b' }}>
+                            Capacidad: {a.capacidadOcupada}/{a.capacidadMaxima}
+                          </div>
+                          <div style={{
+                            width: '100%',
+                            height: 6,
+                            background: '#e2e8f0',
+                            borderRadius: 3,
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              width: `${Math.min(pct, 100)}%`,
+                              height: '100%',
+                              background: colorSemaforo,
+                              borderRadius: 3,
+                              transition: 'width 0.3s'
+                            }} />
+                          </div>
+                          <div style={{ fontSize: 9, marginTop: 2, textAlign: 'right', color: colorSemaforo, fontWeight: 700 }}>
+                            {pct}%
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 10, color: '#3b82f6' }}>
+                          ∞ Capacidad ilimitada
                         </div>
                       )}
                     </div>
@@ -1991,11 +2302,32 @@ export default function Mapa() {
                     <div style={{ fontWeight: 700, marginBottom: 3, color: isSelected ? '#2563eb' : '#1976d2' }}>
                       ✈️ #{v.idTramo}
                     </div>
-                    <div style={{ fontSize: 10, marginBottom: 2 }}>
-                      {v.ciudadOrigenName || "?"} → {v.ciudadDestinoName || "?"}
+                    <div style={{ fontSize: 10, marginBottom: 4 }}>
+                      {v.ciudadOrigenName || v.raw?.origen?.codigo || (v.ciudadOrigenId && airportsById[v.ciudadOrigenId]?.codigo) || "?"} → {v.ciudadDestinoName || v.raw?.destino?.codigo || (v.ciudadDestinoId && airportsById[v.ciudadDestinoId]?.codigo) || "?"}
                     </div>
-                    <div style={{ fontSize: 10, color: '#64748b' }}>
-                      {(pos.progreso * 100).toFixed(0)}% • {capacidadOcupada}/{capacidadMax}
+                    <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>
+                      Progreso vuelo: {(pos.progreso * 100).toFixed(0)}%
+                    </div>
+                    <div style={{ fontSize: 10, color: '#64748b', marginBottom: 2 }}>
+                      Carga: {capacidadOcupada}/{capacidadMax}
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: 6,
+                      background: '#e2e8f0',
+                      borderRadius: 3,
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${Math.min(capacidadPct, 100)}%`,
+                        height: '100%',
+                        background: color,
+                        borderRadius: 3,
+                        transition: 'width 0.3s'
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 9, marginTop: 2, textAlign: 'right', color: color, fontWeight: 700 }}>
+                      {capacidadPct}%
                     </div>
                   </div>
                 </Tooltip>
@@ -2003,19 +2335,6 @@ export default function Mapa() {
             );
           })}
 
-          {/* ⭐ Ruta completa del envío si no está en vuelo */}
-          {rutasEnvioSeleccionado && rutasEnvioSeleccionado.rutas && rutasEnvioSeleccionado.rutas.length > 0 && (
-            <Polyline
-              key={`ruta-envio-${rutasEnvioSeleccionado.id}`}
-              positions={rutasEnvioSeleccionado.rutas.map(r => [r.latOrigen, r.lonOrigen]).concat([[rutasEnvioSeleccionado.rutas[rutasEnvioSeleccionado.rutas.length - 1].latDestino, rutasEnvioSeleccionado.rutas[rutasEnvioSeleccionado.rutas.length - 1].lonDestino]])}
-              weight={4}
-              color="#2563eb"
-              opacity={0.8}
-              dashArray="8,4"
-              lineJoin="round"
-              lineCap="round"
-            />
-          )}
           {/* ⭐ Ruta restante solo del vuelo seleccionado */}
           {selectedRuta && (
             <Polyline

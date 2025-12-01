@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
-import { X, Package, Plane, MapPin, Search, Route } from 'lucide-react';
+import { X, Package, Plane, MapPin, Search, Route, Loader2 } from 'lucide-react';
 import { subscribe, getSimMs } from '../../../lib/simTime';
-import { obtenerEnviosPendientes } from '../../../lib/envios';
+import { obtenerEnviosPendientes, obtenerEnviosPlanificadosConRutas, buscarEnviosPorId } from '../../../lib/envios';
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
@@ -459,6 +459,11 @@ export default function PanelCatalogos({
     const [busquedaEnvio, setBusquedaEnvio] = useState('');
     const [busquedaRutaEnvio, setBusquedaRutaEnvio] = useState('');
 
+    // Estado para resultados de búsqueda del backend (sin límite)
+    const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
+    const [buscandoEnBackend, setBuscandoEnBackend] = useState(false);
+    const busquedaTimeoutRef = useRef(null);
+
     // Estado para envíos pendientes (con rutas)
     const [enviosPendientes, setEnviosPendientes] = useState([]);
 
@@ -506,40 +511,65 @@ export default function PanelCatalogos({
 
     // ⚡ OPTIMIZACIÓN: Cache de datos para evitar recálculos
     const datosCache = useRef({ aeropuertos: [], vuelos: [], lastFetch: 0 });
+    // ⚠️ Flag para evitar llamadas duplicadas
+    const cargandoEnviosRef = useRef(false);
+    // 📦 Guardar los vuelos del último fetch para inyectarlos al mapa
+    const vuelosConEnviosRef = useRef([]);
 
-    // 🔄 CARGA INICIAL: Cargar envíos pendientes al montar el componente (sin depender de isOpen)
-    // Esto permite que los vuelos inyectados aparezcan en el mapa desde el inicio
-    useEffect(() => {
-        const cargarEnviosIniciales = async () => {
-            try {
-                const pendientes = await obtenerEnviosPendientes();
-                const sanitized = sanitizeRutas(pendientes, simTimeRef.current);
-                // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
-                const ordenados = sanitized.sort((a, b) => {
-                    const fechaA = a.fechaIngreso ? new Date(a.fechaIngreso).getTime() : 0;
-                    const fechaB = b.fechaIngreso ? new Date(b.fechaIngreso).getTime() : 0;
-                    return fechaA - fechaB;
-                });
-                setEnviosPendientes(ordenados);
-                // Notificar al padre para inyectar vuelos en el mapa
-                if (onEnviosLoaded && typeof onEnviosLoaded === 'function') {
-                    onEnviosLoaded(ordenados);
-                }
-            } catch (error) {
-                console.error('❌ Error al cargar envíos iniciales:', error);
-            }
-        };
-        cargarEnviosIniciales();
-    }, []); // Solo al montar el componente
+    // 🔄 CARGA INICIAL ELIMINADA - El Mapa.jsx ya hace la carga inicial
+    // Esto evita llamadas duplicadas al endpoint
 
-    // Cargar envíos pendientes cuando se abre el catálogo de rutas
+    // ✈️ Cargar envíos PLANIFICADOS CON RUTAS cuando se abre el catálogo de rutas
+    // Este endpoint devuelve los envíos CON sus vuelos, ideal para mostrar aviones con envíos
     useEffect(() => {
         if (isOpen && catalogoActivo === 'rutasEnvios') {
-            const cargarEnviosPendientes = async () => {
+            // ⚠️ Evitar llamadas duplicadas
+            if (cargandoEnviosRef.current) return;
+
+            const cargarEnviosPlanificados = async () => {
+                cargandoEnviosRef.current = true;
                 setCargando(true);
                 try {
-                    const pendientes = await obtenerEnviosPendientes();
-                    const sanitized = sanitizeRutas(pendientes, simTimeRef.current);
+                    // ✈️ Usar el nuevo endpoint que devuelve envíos CON vuelos
+                    const { envios, vuelos, cantidadEnvios, cantidadVuelos } = await obtenerEnviosPlanificadosConRutas(100);
+
+                    console.log(`✈️ Catálogo: ${cantidadEnvios} envíos, ${cantidadVuelos} vuelos únicos`);
+
+                    // Convertir envíos al formato esperado por el catálogo
+                    const enviosProcesados = envios.map(envio => {
+                        const partes = envio.parteAsignadas || [];
+                        const totalVuelos = partes.reduce((sum, p) => sum + (p.vuelosRuta?.length || 0), 0);
+
+                        // Construir vuelosInfo para compatibilidad
+                        const vuelosInfo = [];
+                        for (const parte of partes) {
+                            for (const v of (parte.vuelosRuta || [])) {
+                                vuelosInfo.push({
+                                    id: v.id,
+                                    ciudadOrigen: v.ciudadOrigen,
+                                    ciudadDestino: v.ciudadDestino,
+                                    horaSalida: v.horaSalida,
+                                    horaLlegada: v.horaLlegada
+                                });
+                            }
+                        }
+
+                        return {
+                            id: envio.id,
+                            idEnvioPorAeropuerto: envio.idEnvioPorAeropuerto,
+                            numProductos: envio.numProductos,
+                            cliente: envio.cliente,
+                            fechaIngreso: envio.fechaIngreso,
+                            aeropuertoDestino: envio.aeropuertoDestino,
+                            aeropuertoOrigen: partes[0]?.aeropuertoOrigen || null,
+                            totalPartes: partes.length,
+                            totalVuelos,
+                            vuelosInfo,
+                            parteAsignadas: partes
+                        };
+                    });
+
+                    const sanitized = sanitizeRutas(enviosProcesados, simTimeRef.current);
                     // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
                     const ordenados = sanitized.sort((a, b) => {
                         const fechaA = a.fechaIngreso ? new Date(a.fechaIngreso).getTime() : 0;
@@ -547,21 +577,29 @@ export default function PanelCatalogos({
                         return fechaA - fechaB;
                     });
                     setEnviosPendientes(ordenados);
-                    // Notificar al padre sobre los envíos cargados
+                    datosCache.current.lastFetch = Date.now();
+
+                    // 📦 Guardar los vuelos para inyectar al mapa
+                    vuelosConEnviosRef.current = vuelos;
+
+                    // Notificar al padre sobre los envíos Y vuelos cargados
                     if (onEnviosLoaded && typeof onEnviosLoaded === 'function') {
-                        onEnviosLoaded(ordenados);
+                        onEnviosLoaded(ordenados, vuelos);
                     }
                 } catch (error) {
-                    console.error('Error al cargar envíos pendientes:', error);
+                    console.error('Error al cargar envíos planificados:', error);
                 } finally {
                     setCargando(false);
+                    cargandoEnviosRef.current = false;
                 }
             };
-            cargarEnviosPendientes();
+            cargarEnviosPlanificados();
         }
     }, [isOpen, catalogoActivo]);
 
-    // Refresco periódico para rutas de envíos
+    // ⚠️ REFRESCO PERIÓDICO DESHABILITADO para evitar OOM
+    // El usuario puede refrescar manualmente si necesita datos actualizados
+    /*
     useEffect(() => {
         if (!(isOpen && catalogoActivo === 'rutasEnvios')) return;
         const interval = setInterval(async () => {
@@ -585,6 +623,7 @@ export default function PanelCatalogos({
         }, 30000);
         return () => clearInterval(interval);
     }, [isOpen, catalogoActivo]);
+    */
 
     // ✅ Suscribirse al tiempo de simulación para actualización en tiempo real
     useEffect(() => {
@@ -790,16 +829,56 @@ export default function PanelCatalogos({
         });
     }, [vuelos, nowMs, busquedaVuelo]);
 
-    // ⚡ OPTIMIZACIÓN: Memoizar filtrado de envíos pendientes
+    // 🔍 Búsqueda en backend con debounce para envíos por ID
+    useEffect(() => {
+        // Limpiar timeout anterior
+        if (busquedaTimeoutRef.current) {
+            clearTimeout(busquedaTimeoutRef.current);
+        }
+
+        const query = busquedaRutaEnvio.trim();
+
+        // Si no hay búsqueda, limpiar resultados y mostrar los 100 iniciales
+        if (!query) {
+            setResultadosBusqueda([]);
+            setBuscandoEnBackend(false);
+            return;
+        }
+
+        // Debounce: esperar 400ms después de que el usuario deje de escribir
+        setBuscandoEnBackend(true);
+        busquedaTimeoutRef.current = setTimeout(async () => {
+            try {
+                console.log(`🔍 Buscando envíos con ID: ${query}`);
+                const resultado = await buscarEnviosPorId(query);
+                // buscarEnviosPorId devuelve { envios: [], cantidadEncontrados }
+                const enviosEncontrados = resultado.envios || [];
+                console.log(`✅ Encontrados ${enviosEncontrados.length} envíos`);
+                setResultadosBusqueda(enviosEncontrados);
+            } catch (error) {
+                console.error('Error buscando envíos:', error);
+                setResultadosBusqueda([]);
+            } finally {
+                setBuscandoEnBackend(false);
+            }
+        }, 400);
+
+        return () => {
+            if (busquedaTimeoutRef.current) {
+                clearTimeout(busquedaTimeoutRef.current);
+            }
+        };
+    }, [busquedaRutaEnvio]);
+
+    // ⚡ OPTIMIZACIÓN: Usar resultados del backend si hay búsqueda, sino los 100 iniciales
     const enviosPendientesFiltrados = useMemo(() => {
-        if (!busquedaRutaEnvio.trim()) return enviosPendientes;
-        const termino = busquedaRutaEnvio.toLowerCase().trim();
-        return enviosPendientes.filter(e => {
-            const id = String(e.id || '').toLowerCase();
-            const idPorAeropuerto = String(e.idEnvioPorAeropuerto || '').toLowerCase();
-            return id.includes(termino) || idPorAeropuerto.includes(termino);
-        });
-    }, [enviosPendientes, busquedaRutaEnvio]);
+        // Si hay búsqueda activa, usar resultados del backend
+        if (busquedaRutaEnvio.trim()) {
+            return resultadosBusqueda;
+        }
+        // Sin búsqueda, mostrar los 100 envíos iniciales
+        return enviosPendientes;
+    }, [enviosPendientes, busquedaRutaEnvio, resultadosBusqueda]);
 
     const catalogos = [
         { id: 'aeropuertos', nombre: 'Aeropuertos' },
@@ -916,6 +995,26 @@ export default function PanelCatalogos({
         }
 
         if (catalogoActivo === 'rutasEnvios') {
+            // Mostrar indicador de búsqueda en progreso
+            if (buscandoEnBackend) {
+                return (
+                    <div style={{
+                        padding: 40,
+                        textAlign: 'center',
+                        color: '#6b7280',
+                        fontSize: 14,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 12
+                    }}>
+                        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
+                        <span>Buscando envío #{busquedaRutaEnvio.trim()}...</span>
+                        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                );
+            }
+
             if (enviosPendientesFiltrados.length === 0) {
                 return (
                     <div style={{
@@ -924,20 +1023,39 @@ export default function PanelCatalogos({
                         color: '#9ca3af',
                         fontSize: 14
                     }}>
-                        {busquedaRutaEnvio.trim() ? 'No se encontraron envíos' : 'No hay envíos pendientes'}
+                        {busquedaRutaEnvio.trim()
+                            ? `No se encontró el envío #${busquedaRutaEnvio.trim()}`
+                            : 'No hay envíos pendientes'}
                     </div>
                 );
             }
-            return enviosPendientesFiltrados.map((item, idx) => (
-                <EnvioPendienteItem
-                    key={item.id || idx}
-                    envio={item}
-                    aeropuertos={aeropuertos}
-                    onSelect={onSelectRutaEnvio}
-                    vuelosMap={vuelosMap}
-                    selectedVuelo={selectedVuelo}
-                />
-            ));
+
+            return (
+                <>
+                    {busquedaRutaEnvio.trim() && (
+                        <div style={{
+                            padding: '8px 12px',
+                            background: '#dbeafe',
+                            borderBottom: '1px solid #93c5fd',
+                            fontSize: 12,
+                            color: '#1e40af',
+                            fontWeight: 500
+                        }}>
+                            🔍 Encontrados {enviosPendientesFiltrados.length} envío(s) con ID "{busquedaRutaEnvio.trim()}"
+                        </div>
+                    )}
+                    {enviosPendientesFiltrados.map((item, idx) => (
+                        <EnvioPendienteItem
+                            key={item.id || idx}
+                            envio={item}
+                            aeropuertos={aeropuertos}
+                            onSelect={onSelectRutaEnvio}
+                            vuelosMap={vuelosMap}
+                            selectedVuelo={selectedVuelo}
+                        />
+                    ))}
+                </>
+            );
         }
 
         return null;
@@ -1059,7 +1177,7 @@ export default function PanelCatalogos({
                         placeholder={
                             catalogoActivo === 'aeropuertos' ? 'Buscar por código, ciudad, país...' :
                                 catalogoActivo === 'vuelos' ? 'Buscar por ID, origen, destino...' :
-                                    catalogoActivo === 'rutasEnvios' ? 'Buscar por número de envío (ID o interno)...' :
+                                    catalogoActivo === 'rutasEnvios' ? 'Buscar cualquier envío por ID (ej: 12345, 123...)' :
                                         'Buscar por ID de envío, vuelo...'
                         }
                         value={

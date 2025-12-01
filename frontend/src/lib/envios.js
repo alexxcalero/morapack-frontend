@@ -275,3 +275,151 @@ export async function obtenerEnviosPendientes() {
         return [];
     }
 }
+
+/**
+ * ✈️ Obtiene envíos PLANIFICADOS con sus rutas de vuelos completas.
+ * Este endpoint es el correcto para mostrar aviones CON envíos en el mapa.
+ * @param {number} limit - Límite de envíos (por defecto 100, máximo 200)
+ * @returns {Promise<Object>} { envios: [], vuelos: [], cantidadEnvios, cantidadVuelos }
+ */
+export async function obtenerEnviosPlanificadosConRutas(limit = 100) {
+    try {
+        const response = await fetch(`${API_BASE}/api/envios/obtenerPlanificadosConRutas?limit=${limit}`);
+
+        if (!response.ok) {
+            console.error('Error al obtener envíos planificados con rutas:', response.status);
+            return { envios: [], vuelos: [], cantidadEnvios: 0, cantidadVuelos: 0 };
+        }
+
+        const data = await response.json();
+
+        if (data.estado === 'error') {
+            console.error('Error del backend:', data.mensaje);
+            return { envios: [], vuelos: [], cantidadEnvios: 0, cantidadVuelos: 0 };
+        }
+
+        console.log(`✈️ Recibidos ${data.cantidadEnvios} envíos con ${data.cantidadVuelos} vuelos únicos`);
+
+        // Procesar los vuelos para formato compatible con el mapa
+        const vuelosProcesados = (data.vuelos || []).map(v => {
+            // Parsear fechas del formato "yyyy-MM-dd HH:mm (UTC+00:00)"
+            let horaSalida = null;
+            let horaLlegada = null;
+
+            if (v.horaSalida) {
+                const match = v.horaSalida.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, datePart, hh, mm] = match;
+                    const [y, mo, d] = datePart.split('-').map(Number);
+                    horaSalida = new Date(Date.UTC(y, mo - 1, d, parseInt(hh), parseInt(mm), 0));
+                }
+            }
+
+            if (v.horaLlegada) {
+                const match = v.horaLlegada.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, datePart, hh, mm] = match;
+                    const [y, mo, d] = datePart.split('-').map(Number);
+                    horaLlegada = new Date(Date.UTC(y, mo - 1, d, parseInt(hh), parseInt(mm), 0));
+                }
+            }
+
+            return {
+                id: v.id,
+                ciudadOrigen: v.ciudadOrigen,
+                ciudadDestino: v.ciudadDestino,
+                horaSalida,
+                horaLlegada,
+                horaSalidaStr: v.horaSalida,
+                horaLlegadaStr: v.horaLlegada,
+                envioId: v.envioId,
+                parteId: v.parteId,
+                cantidad: v.cantidad,
+                // Datos para inyección en el mapa
+                __deRutaEnvio: true
+            };
+        });
+
+        return {
+            envios: data.envios || [],
+            vuelos: vuelosProcesados,
+            cantidadEnvios: data.cantidadEnvios || 0,
+            cantidadVuelos: data.cantidadVuelos || 0,
+            tiempoMs: data.tiempoMs
+        };
+    } catch (error) {
+        console.error('Error al obtener envíos planificados con rutas:', error);
+        return { envios: [], vuelos: [], cantidadEnvios: 0, cantidadVuelos: 0 };
+    }
+}
+
+/**
+ * 🔍 Busca envíos por ID directamente en el backend.
+ * Útil para encontrar envíos específicos que están en aviones volando,
+ * sin el límite de 100 del catálogo.
+ * @param {string} query - ID del envío a buscar (completo o parcial)
+ * @param {number} limit - Límite de resultados (por defecto 50)
+ * @returns {Promise<Object>} { envios: [], cantidadEncontrados }
+ */
+export async function buscarEnviosPorId(query, limit = 50) {
+    try {
+        const response = await fetch(`${API_BASE}/api/envios/buscar?query=${encodeURIComponent(query)}&limit=${limit}`);
+
+        if (!response.ok) {
+            console.error('Error al buscar envíos:', response.status);
+            return { envios: [], cantidadEncontrados: 0 };
+        }
+
+        const data = await response.json();
+
+        if (data.estado === 'error') {
+            console.error('Error del backend:', data.mensaje);
+            return { envios: [], cantidadEncontrados: 0 };
+        }
+
+        console.log(`🔍 Encontrados ${data.cantidadEncontrados} envíos para "${query}"`);
+
+        // Convertir al formato esperado por el catálogo
+        const enviosProcesados = (data.envios || []).map(envio => {
+            const partes = envio.parteAsignadas || [];
+
+            // Construir vuelosInfo para compatibilidad
+            const vuelosInfo = [];
+            for (const parte of partes) {
+                for (const v of (parte.vuelosRuta || [])) {
+                    vuelosInfo.push({
+                        id: v.id,
+                        ciudadOrigen: v.ciudadOrigen,
+                        ciudadDestino: v.ciudadDestino,
+                        horaSalida: v.horaSalida,
+                        horaLlegada: v.horaLlegada
+                    });
+                }
+            }
+
+            return {
+                id: envio.id,
+                idEnvioPorAeropuerto: envio.idEnvioPorAeropuerto,
+                numProductos: envio.numProductos,
+                cliente: envio.cliente,
+                fechaIngreso: envio.fechaIngreso,
+                estado: envio.estado,
+                aeropuertoDestino: envio.aeropuertoDestino,
+                aeropuertoOrigen: partes[0]?.aeropuertoOrigen || null,
+                totalPartes: envio.totalPartes || partes.length,
+                totalVuelos: envio.totalVuelos || vuelosInfo.length,
+                vuelosInfo,
+                parteAsignadas: partes
+            };
+        });
+
+        return {
+            envios: enviosProcesados,
+            cantidadEncontrados: data.cantidadEncontrados || 0,
+            tiempoMs: data.tiempoMs
+        };
+    } catch (error) {
+        console.error('Error al buscar envíos:', error);
+        return { envios: [], cantidadEncontrados: 0 };
+    }
+}
