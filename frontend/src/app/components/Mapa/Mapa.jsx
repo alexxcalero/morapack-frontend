@@ -358,6 +358,9 @@ export default function Mapa() {
   const [datosResumen, setDatosResumen] = useState(null);
   const [esSimulacionDetenida, setEsSimulacionDetenida] = useState(false);
 
+  // 🔄 Contador de ciclos para refrescar catálogo cuando llegan nuevos envíos
+  const [cicloActual, setCicloActual] = useState(0);
+
   // No inicialices initSim aquí: HoraActual es quien controla startMs.
   // Suscripción global a tiempo de simulación
   const [nowMs, setNowMs] = useState(() => getSimMs());
@@ -437,7 +440,20 @@ export default function Mapa() {
     topic: '/topic/planificacion',
     enabled: true,
     onMessage: useCallback((message) => {
+      // 📢 Manejar estado del planificador (cuando backend detiene simulación)
+      if (message?.tipo === 'estado_planificador') {
+        console.log('📢 Estado planificador recibido:', message);
+        if (message.activo === false) {
+          console.log('🛑 Backend detuvo la simulación - despachando evento planificador:detenido');
+          window.dispatchEvent(new CustomEvent('planificador:detenido', { detail: message }));
+        }
+        return;
+      }
+
       if (message?.tipo === 'update_ciclo') {
+        // 🔄 Incrementar contador de ciclos para que el catálogo refresque
+        setCicloActual(prev => prev + 1);
+
         // Refrescar de inmediato los datos del último ciclo
         (async () => {
           try {
@@ -715,115 +731,15 @@ export default function Mapa() {
     }
   }, [horizonte]);
 
-  // 🎯 Detectar fin de simulación y mostrar resumen
-  useEffect(() => {
-    if (!horizonte?.inicio || !horizonte?.fin) return;
-    if (!isRunning()) {
-      yaSeDetuvoRef.current = false;
-      return;
-    }
+  // 🎯 Detectar fin de simulación SEMANAL completa (NO fin de horizonte individual)
+  // ⚠️ IMPORTANTE: El frontend NO debe detener automáticamente cuando llega al fin de un horizonte
+  // de 4 horas. El backend continúa planificando y enviará nuevos horizontes vía WebSocket.
+  // Solo detener cuando el backend envía la señal explícita de que terminó la simulación semanal.
+  // Esta lógica ahora solo se activa cuando el backend notifica 'simulacion_completada' vía WebSocket
+  // o cuando el usuario presiona el botón DETENER manualmente.
 
-    const ini = parsePlanificadorTime(horizonte.inicio);
-    const fin = parsePlanificadorTime(horizonte.fin);
-    if (!ini || !fin) return;
-
-    // Guardar fechas de referencia
-    if (!fechaInicioSimRef.current) fechaInicioSimRef.current = ini;
-    if (!fechaFinSimRef.current) fechaFinSimRef.current = fin;
-
-    const checkFin = async () => {
-      const simMs = getSimMs();
-      const finMs = fin.getTime();
-
-      // Si la simulación llegó al fin y aún no se detuvo
-      if (simMs >= finMs && !yaSeDetuvoRef.current) {
-        yaSeDetuvoRef.current = true;
-
-
-        try {
-          // Detener simulación en el backend (endpoint correcto)
-          const detenerRes = await fetch(`${API_BASE}/api/planificador/detener`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" }
-          });
-
-          if (!detenerRes.ok) {
-            console.warn('⚠️ Error al detener simulación:', detenerRes.status);
-          }
-
-          // Limpiar caché de vuelos al detener
-          setVuelosCache([]);
-          setRawVuelos([]);
-          setLocalAirportCapacities({}); // Resetear capacidades locales
-
-
-          // Obtener resumen de planificación desde el backend
-          try {
-            const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
-            if (resumenRes.ok) {
-              const data = await resumenRes.json();
-
-              console.log('📊 Resumen de planificación:', data);
-
-              // Transformar datos del backend al formato que espera el modal
-              const statsPedidos = data.estadisticasPedidos || {};
-              const statsPorEstado = data.estadisticasPorEstado || {};
-              const infoGeneral = data.informacionGeneral || {};
-
-              const resumenFormateado = {
-                totalEnvios: statsPedidos.totalPedidos || 0,
-                enviosEntregados: statsPorEstado.enviosEntregados || 0,
-                enviosEnTransito: statsPorEstado.enviosEnRuta || 0,
-                enviosPendientes: (statsPorEstado.enviosRegistrados || 0) + (statsPorEstado.enviosPlanificados || 0),
-                porcentajeCompletado: statsPedidos.tasaExito || 0,
-                duracionSimulacion: calcularDuracionSimulacion(
-                  infoGeneral.fechaInicio,
-                  infoGeneral.fechaFin,
-                  infoGeneral.cicloActual
-                ),
-              };
-
-              // Mostrar modal de resumen
-              setDatosResumen(resumenFormateado);
-              setEsSimulacionDetenida(false);
-              setMostrarModalResumen(true);
-            } else {
-              console.warn('⚠️ Error al obtener resumen:', resumenRes.status);
-              // Fallback: abrir modal con datos mínimos si el backend no responde
-              setDatosResumen({
-                totalEnvios: 0,
-                enviosEntregados: 0,
-                enviosEnTransito: 0,
-                enviosPendientes: 0,
-                porcentajeCompletado: 0,
-                duracionSimulacion: 'No disponible'
-              });
-              setEsSimulacionDetenida(false);
-              setMostrarModalResumen(true);
-            }
-          } catch (error) {
-            console.error('❌ Error al obtener resumen de planificación:', error);
-            // Fallback: abrir modal aún si falla el resumen
-            setDatosResumen({
-              totalEnvios: 0,
-              enviosEntregados: 0,
-              enviosEnTransito: 0,
-              enviosPendientes: 0,
-              porcentajeCompletado: 0,
-              duracionSimulacion: 'No disponible'
-            });
-            setEsSimulacionDetenida(false);
-            setMostrarModalResumen(true);
-          }
-        } catch (error) {
-          console.error('❌ Error al procesar fin de simulación:', error);
-        }
-      }
-    };
-
-    const interval = setInterval(checkFin, 2000); // Verificar cada 2 segundos
-    return () => clearInterval(interval);
-  }, [horizonte, nowMs]);
+  // useEffect anterior que detenía automáticamente - DESHABILITADO para evitar detención prematura
+  // El frontend ahora espera la señal del backend para saber cuándo terminó realmente
 
   // Resetear estado cuando se inicia nueva simulación
   useEffect(() => {
@@ -2044,6 +1960,7 @@ export default function Mapa() {
         vuelosConEnvios={vuelosConEnvios}
         selectedVuelo={vueloDetalleCompleto}
         onEnviosLoaded={handleEnviosLoaded}
+        cicloActual={cicloActual}
       />
 
       {/* ⭐ Panel de detalle del vuelo seleccionado */}
@@ -2146,7 +2063,7 @@ export default function Mapa() {
             const pct = a.porcentaje;
             const colorSemaforo = pct == null ? '#6b7280' : pct <= 60 ? '#10b981' : pct <= 85 ? '#f59e0b' : '#ef4444';
             const esIlimitado = a.ilimitado === true;
-            
+
             return (
               <Fragment key={`ap-frag-${a.id}`}>
                 {/* Círculo de fondo con color semáforo */}
@@ -2155,9 +2072,9 @@ export default function Mapa() {
                     key={`ap-bg-${a.id}`}
                     center={[a.lat, a.lon]}
                     radius={isSelected ? 12 : 8}
-                    pathOptions={{ 
-                      color: colorSemaforo, 
-                      weight: 2, 
+                    pathOptions={{
+                      color: colorSemaforo,
+                      weight: 2,
                       fillColor: colorSemaforo,
                       fillOpacity: 0.3,
                       opacity: 0.8

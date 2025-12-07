@@ -446,7 +446,8 @@ export default function PanelCatalogos({
     vuelosConEnvios = [],
     envios: enviosProp = null,
     selectedVuelo = null,
-    onEnviosLoaded = null
+    onEnviosLoaded = null,
+    cicloActual = 0 // 🔄 Contador de ciclos para refrescar envíos
 }) {
     const [catalogoActivo, setCatalogoActivo] = useState('vuelos');
     const [aeropuertos, setAeropuertos] = useState(aeropuertosProp);
@@ -521,6 +522,7 @@ export default function PanelCatalogos({
 
     // ✈️ Cargar envíos PLANIFICADOS CON RUTAS cuando se abre el catálogo de rutas
     // Este endpoint devuelve los envíos CON sus vuelos, ideal para mostrar aviones con envíos
+    // 🔄 También refresca cuando cambia cicloActual (nuevo ciclo del planificador)
     useEffect(() => {
         if (isOpen && catalogoActivo === 'rutasEnvios') {
             // ⚠️ Evitar llamadas duplicadas
@@ -533,7 +535,7 @@ export default function PanelCatalogos({
                     // ✈️ Usar el nuevo endpoint que devuelve envíos CON vuelos
                     const { envios, vuelos, cantidadEnvios, cantidadVuelos } = await obtenerEnviosPlanificadosConRutas(100);
 
-                    console.log(`✈️ Catálogo: ${cantidadEnvios} envíos, ${cantidadVuelos} vuelos únicos`);
+                    console.log(`✈️ Catálogo (ciclo ${cicloActual}): ${cantidadEnvios} envíos, ${cantidadVuelos} vuelos únicos`);
 
                     // Convertir envíos al formato esperado por el catálogo
                     const enviosProcesados = envios.map(envio => {
@@ -595,7 +597,7 @@ export default function PanelCatalogos({
             };
             cargarEnviosPlanificados();
         }
-    }, [isOpen, catalogoActivo]);
+    }, [isOpen, catalogoActivo, cicloActual]); // 🔄 Agregar cicloActual como dependencia
 
     // ⚠️ REFRESCO PERIÓDICO DESHABILITADO para evitar OOM
     // El usuario puede refrescar manualmente si necesita datos actualizados
