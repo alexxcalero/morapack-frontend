@@ -52,7 +52,7 @@ const AeropuertoItem = memo(({ item, onSelect }) => {
     const porcentaje = !ilimitado && item.capacidadMaxima > 0
         ? Math.round((item.capacidadOcupada / item.capacidadMaxima) * 100)
         : 0;
-    const color = porcentaje <= 60 ? '#10b981' : porcentaje <= 85 ? '#f59e0b' : '#ef4444';
+    const color = porcentaje < 50 ? '#10b981' : porcentaje < 80 ? '#f59e0b' : '#ef4444';
     const paisTexto = typeof item?.pais === 'string'
         ? item.pais
         : (item?.pais?.nombre || item?.raw?.pais?.nombre || 'N/A');
