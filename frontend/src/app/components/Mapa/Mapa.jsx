@@ -86,7 +86,80 @@ const OrangeIcon = L.icon({ iconUrl: iconUrls.orange, shadowUrl: "https://unpkg.
 const RedIcon = L.icon({ iconUrl: iconUrls.red, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
 const UnknownIcon = L.icon({ iconUrl: iconUrls.violet, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
 
-// Controlador para realizar flyTo desde dentro del contexto del mapa
+// ✅ ÍCONOS PERSONALIZADOS PARA ALMACENES (respuesta a retroalimentación del profesor)
+// Almacén Principal: Edificio industrial con estrella (Lima, Bruselas, Bakú)
+const AlmacenPrincipalIcon = L.divIcon({
+  className: '',
+  html: `
+    <div style="position: relative; width: 32px; height: 32px; background: transparent; border: none;">
+      <svg viewBox="0 0 24 24" width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+        <!-- Almacén industrial -->
+        <rect x="2" y="8" width="20" height="14" rx="1" fill="#1e40af" stroke="#1e3a8a" stroke-width="1"/>
+        <!-- Techo de almacén (forma industrial) -->
+        <path d="M1 8 L12 2 L23 8" fill="none" stroke="#1e3a8a" stroke-width="1.5"/>
+        <rect x="2" y="4" width="20" height="4" fill="#3b82f6"/>
+        <!-- Puerta de carga -->
+        <rect x="8" y="13" width="8" height="9" fill="#60a5fa" stroke="#1e3a8a" stroke-width="0.5"/>
+        <!-- Líneas de puerta de garaje -->
+        <line x1="8" y1="15" x2="16" y2="15" stroke="#1e3a8a" stroke-width="0.5"/>
+        <line x1="8" y1="17" x2="16" y2="17" stroke="#1e3a8a" stroke-width="0.5"/>
+        <line x1="8" y1="19" x2="16" y2="19" stroke="#1e3a8a" stroke-width="0.5"/>
+        <!-- Cajas apiladas (símbolo de almacén) -->
+        <rect x="3" y="14" width="4" height="3" fill="#fbbf24" stroke="#f59e0b" stroke-width="0.3"/>
+        <rect x="17" y="14" width="4" height="3" fill="#fbbf24" stroke="#f59e0b" stroke-width="0.3"/>
+        <rect x="4" y="11" width="3" height="3" fill="#fcd34d" stroke="#f59e0b" stroke-width="0.3"/>
+        <!-- Estrella (indica principal) -->
+        <polygon points="12,0 13,3 16,3 13.5,5 14.5,8 12,6 9.5,8 10.5,5 8,3 11,3" fill="#fbbf24" stroke="#f59e0b" stroke-width="0.3"/>
+      </svg>
+    </div>
+  `,
+  iconSize: [32, 32],
+  iconAnchor: [16, 30],
+  popupAnchor: [0, -30]
+});
+
+// Función para crear ícono de almacén intermedio con color según capacidad
+const createAlmacenIntermedioIcon = (color) => {
+  const colors = {
+    green: { fill: '#16a34a', stroke: '#15803d', light: '#4ade80', box: '#86efac' },
+    orange: { fill: '#ea580c', stroke: '#c2410c', light: '#fb923c', box: '#fdba74' },
+    red: { fill: '#dc2626', stroke: '#b91c1c', light: '#f87171', box: '#fca5a5' },
+    violet: { fill: '#7c3aed', stroke: '#6d28d9', light: '#a78bfa', box: '#c4b5fd' }
+  };
+  const c = colors[color] || colors.green;
+
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="position: relative; width: 28px; height: 28px; background: transparent; border: none;">
+        <svg viewBox="0 0 20 20" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+          <!-- Almacén pequeño -->
+          <rect x="2" y="6" width="16" height="12" rx="1" fill="${c.fill}" stroke="${c.stroke}" stroke-width="0.8"/>
+          <!-- Techo -->
+          <rect x="2" y="4" width="16" height="3" fill="${c.light}"/>
+          <!-- Puerta de carga -->
+          <rect x="6" y="10" width="8" height="8" fill="${c.light}" stroke="${c.stroke}" stroke-width="0.4"/>
+          <!-- Líneas de puerta -->
+          <line x1="6" y1="12" x2="14" y2="12" stroke="${c.stroke}" stroke-width="0.4"/>
+          <line x1="6" y1="14" x2="14" y2="14" stroke="${c.stroke}" stroke-width="0.4"/>
+          <line x1="6" y1="16" x2="14" y2="16" stroke="${c.stroke}" stroke-width="0.4"/>
+          <!-- Cajas -->
+          <rect x="2.5" y="11" width="3" height="2.5" fill="${c.box}" stroke="${c.stroke}" stroke-width="0.2"/>
+          <rect x="14.5" y="11" width="3" height="2.5" fill="${c.box}" stroke="${c.stroke}" stroke-width="0.2"/>
+        </svg>
+      </div>
+    `,
+    iconSize: [28, 28],
+    iconAnchor: [14, 26],
+    popupAnchor: [0, -26]
+  });
+};
+
+// Íconos de almacén intermedio por estado de capacidad
+const AlmacenIntermedioGreenIcon = createAlmacenIntermedioIcon('green');
+const AlmacenIntermedioOrangeIcon = createAlmacenIntermedioIcon('orange');
+const AlmacenIntermedioRedIcon = createAlmacenIntermedioIcon('red');
+const AlmacenIntermedioUnknownIcon = createAlmacenIntermedioIcon('violet');// Controlador para realizar flyTo desde dentro del contexto del mapa
 function SmoothFlyTo({ target }) {
   const map = useMap();
   useEffect(() => {
@@ -895,11 +968,20 @@ export default function Mapa() {
   };
 
   function pickIconAirport(a) {
-    const city = String(a.ciudad ?? "").toLowerCase(); const code = String(a.codigo ?? "").toLowerCase();
-    if (city.includes("lima") || code === "spim" || code === "spjc") return BlueIcon;
-    if (city.includes("brus") || city.includes("brussels") || code.startsWith("eb")) return BlueIcon;
-    if (city.includes("baku") || code === "gyd" || code === "ubbb") return BlueIcon;
-    const pct = a.porcentaje; if (pct == null) return UnknownIcon; if (pct <= 60) return GreenIcon; if (pct <= 85) return OrangeIcon; return RedIcon;
+    const city = String(a.ciudad ?? "").toLowerCase();
+    const code = String(a.codigo ?? "").toLowerCase();
+
+    // ✅ Almacenes principales (Lima, Bruselas, Bakú) - Ícono de edificio grande con estrella
+    if (city.includes("lima") || code === "spim" || code === "spjc") return AlmacenPrincipalIcon;
+    if (city.includes("brus") || city.includes("brussels") || code.startsWith("eb")) return AlmacenPrincipalIcon;
+    if (city.includes("baku") || code === "gyd" || code === "ubbb") return AlmacenPrincipalIcon;
+
+    // ✅ Almacenes intermedios/oficinas de paso - Ícono de edificio según capacidad
+    const pct = a.porcentaje;
+    if (pct == null) return AlmacenIntermedioUnknownIcon;
+    if (pct < 50) return AlmacenIntermedioGreenIcon;
+    if (pct < 80) return AlmacenIntermedioOrangeIcon;
+    return AlmacenIntermedioRedIcon;
   }
 
   // ✅ Usar aeropuertos con capacidades actualizadas desde el backend
@@ -2061,26 +2143,11 @@ export default function Mapa() {
             const isSelected = aeropuertoSeleccionado === a.id;
             // Color semáforo según capacidad
             const pct = a.porcentaje;
-            const colorSemaforo = pct == null ? '#6b7280' : pct <= 60 ? '#10b981' : pct <= 85 ? '#f59e0b' : '#ef4444';
+            const colorSemaforo = pct == null ? '#6b7280' : pct < 50 ? '#10b981' : pct < 80 ? '#f59e0b' : '#ef4444';
             const esIlimitado = a.ilimitado === true;
 
             return (
               <Fragment key={`ap-frag-${a.id}`}>
-                {/* Círculo de fondo con color semáforo */}
-                {!esIlimitado && (
-                  <CircleMarker
-                    key={`ap-bg-${a.id}`}
-                    center={[a.lat, a.lon]}
-                    radius={isSelected ? 12 : 8}
-                    pathOptions={{
-                      color: colorSemaforo,
-                      weight: 2,
-                      fillColor: colorSemaforo,
-                      fillOpacity: 0.3,
-                      opacity: 0.8
-                    }}
-                  />
-                )}
                 <Marker
                   key={`ap-${a.id}`}
                   position={[a.lat, a.lon]}
@@ -2167,7 +2234,7 @@ export default function Mapa() {
             const capacidadPct = capacidadMax > 0 ? Math.round((capacidadOcupada / capacidadMax) * 100) : 0;
             const color = isSelected
               ? "#2563eb"
-              : capacidadPct <= 60 ? "#10b981" : capacidadPct <= 85 ? "#f59e0b" : "#dc2626";
+              : capacidadPct < 50 ? "#10b981" : capacidadPct < 80 ? "#f59e0b" : "#dc2626";
 
             // Usar rotación calculada (rumbo actual - 90°)
             const icono = getPlaneIcon(color, v.rotation ?? 0);

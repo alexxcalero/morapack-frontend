@@ -284,3 +284,26 @@ body {
     transform: translateY(0) scale(1);
   }
 }
+
+/* ✅ Estilos para íconos personalizados de almacén en el mapa */
+.custom-warehouse-icon {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.custom-warehouse-icon:hover {
+  filter: brightness(1.1);
+}
+
+.custom-warehouse-icon:focus {
+  outline: none !important;
+}
+
+/* Eliminar estilos por defecto de Leaflet para divIcon */
+.leaflet-marker-icon.custom-warehouse-icon {
+  background: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}

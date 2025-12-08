@@ -8,6 +8,8 @@ const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.i
 export default function SimulationControls({ startStr = null }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
     const [iniciando, setIniciando] = useState(false); // ← estado separado para iniciar sin bloquear UI
+    const [inicializando, setInicializando] = useState(false); // ← estado para el botón inicializar
+    const [inicializado, setInicializado] = useState(false); // ← indica si ya se limpió y está listo para iniciar
     const [fechaInicio, setFechaInicio] = useState(""); // ← fecha inicio editable
 
     // ✅ Calcular fecha fin automáticamente (+7 días)
@@ -75,29 +77,47 @@ export default function SimulationControls({ startStr = null }) {
         }
     };
 
+    // ✅ Nuevo botón: Inicializar (limpia planificación y prepara para iniciar)
+    const inicializar = async () => {
+        if (estado.activo) {
+            alert("Detén la simulación antes de inicializar.");
+            return;
+        }
+        setInicializando(true);
+        console.log('🧹 [FRONTEND] Inicializando (limpiando planificación anterior)...');
+        try {
+            const limpiarRes = await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
+            if (limpiarRes.ok) {
+                const limpiarData = await limpiarRes.json();
+                console.log('✅ Inicialización completada:', limpiarData);
+                setInicializado(true); // ← Ahora está listo para iniciar
+                alert("✅ Inicialización completada. Ya puedes iniciar la simulación.");
+            } else {
+                alert("❌ Error al inicializar simulación.");
+                setInicializado(false);
+            }
+        } catch (err) {
+            console.error("Error inicializar:", err);
+            alert("❌ Error de conexión al inicializar.");
+            setInicializado(false);
+        } finally {
+            setInicializando(false);
+            fetchEstado();
+        }
+    };
+
     const iniciar = async () => {
         if (!fechaInicio) {
             alert("Por favor ingresa una fecha de inicio.");
             return;
         }
+        if (!inicializado) {
+            alert("Debes inicializar primero antes de iniciar la simulación.");
+            return;
+        }
         setIniciando(true); // ← no bloquea la UI global, solo el botón
         console.log(`🚀 [FRONTEND] Iniciando simulación a las ${new Date().toLocaleTimeString()}`);
         try {
-            // ⚡ IMPORTANTE: Esperar a que la limpieza termine ANTES de iniciar
-            // Esto asegura que los envíos estén en estado NULL y disponibles
-            console.log('🧹 [FRONTEND] Limpiando planificación anterior...');
-            try {
-                const limpiarRes = await fetch(`${API_BASE}/api/planificador/limpiar-planificacion`, { method: "POST" });
-                if (limpiarRes.ok) {
-                    const limpiarData = await limpiarRes.json();
-                    console.log('✅ Limpieza completada:', limpiarData);
-                } else {
-                    console.warn('⚠️ Error en limpieza, continuando de todos modos...');
-                }
-            } catch (err) {
-                console.warn('⚠️ Error en limpieza (no crítico):', err);
-            }
-
             // Pequeña pausa para asegurar que la BD se sincronice
             await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -142,6 +162,7 @@ export default function SimulationControls({ startStr = null }) {
 
             // Actualizar estado inmediatamente sin esperar el polling
             setEstado({ activo: true, cargando: false });
+            setInicializado(false); // ← Resetear para requerir inicializar después de detener
         } finally {
             setIniciando(false);
             // fetchEstado se ejecutará en el próximo ciclo del polling
@@ -254,20 +275,48 @@ export default function SimulationControls({ startStr = null }) {
                 />
             </div>
 
+            {/* ✅ Botón Inicializar: limpia planificación y prepara para iniciar */}
             <button
                 type="button"
-                onClick={iniciar}
-                disabled={iniciando || estado.activo || estado.cargando || !fechaInicio}
+                onClick={inicializar}
+                disabled={inicializando || estado.activo || estado.cargando || inicializado}
                 style={{
                     ...btnStyle,
                     border: "none",
-                    background: estado.activo || !fechaInicio || iniciando || estado.cargando ? "#94a3b8" : "#3b82f6",
+                    background: inicializando ? "#f59e0b" : (estado.activo || estado.cargando || inicializado) ? "#94a3b8" : "#10b981",
                     color: "white",
-                    cursor: estado.activo || !fechaInicio || iniciando || estado.cargando ? "not-allowed" : "pointer",
+                    cursor: (inicializando || estado.activo || estado.cargando || inicializado) ? "not-allowed" : "pointer",
                 }}
-                title={estado.cargando ? "Espera a que se detenga" : estado.activo ? "Simulación en ejecución - Detén primero para reiniciar" : !fechaInicio ? "Ingresa fecha de inicio" : "Iniciar planificador"}
+                title={
+                    inicializando ? "Inicializando..." :
+                        estado.activo ? "Detén la simulación primero" :
+                            inicializado ? "Ya inicializado - Puedes iniciar" :
+                                "Limpiar planificación anterior y preparar para nueva simulación"
+                }
             >
-                {iniciando ? "Iniciando..." : estado.activo ? "En ejecución" : "Iniciar"}
+                {inicializando ? "⏳ Inicializando..." : inicializado ? "✓ Listo" : "🔄 Inicializar"}
+            </button>
+
+            <button
+                type="button"
+                onClick={iniciar}
+                disabled={iniciando || estado.activo || estado.cargando || !fechaInicio || !inicializado}
+                style={{
+                    ...btnStyle,
+                    border: "none",
+                    background: (estado.activo || !fechaInicio || iniciando || estado.cargando || !inicializado) ? "#94a3b8" : "#3b82f6",
+                    color: "white",
+                    cursor: (estado.activo || !fechaInicio || iniciando || estado.cargando || !inicializado) ? "not-allowed" : "pointer",
+                }}
+                title={
+                    estado.cargando ? "Espera a que se detenga" :
+                        estado.activo ? "Simulación en ejecución - Detén primero" :
+                            !inicializado ? "Debes inicializar primero" :
+                                !fechaInicio ? "Ingresa fecha de inicio" :
+                                    "Iniciar planificador"
+                }
+            >
+                {iniciando ? "Iniciando..." : estado.activo ? "En ejecución" : "▶ Iniciar"}
             </button>
 
             <button
