@@ -1,11 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
-import { X, Package, Plane, MapPin, Search, Route } from 'lucide-react';
+import { X, Plane, MapPin, Search, Route } from 'lucide-react';
 import { subscribe, getSimMs } from '../../../lib/simTime';
 import { obtenerEnviosPendientes } from '../../../lib/envios';
-
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 // Función para parsear fechas del backend
 function parseBackendTime(s) {
@@ -114,7 +112,7 @@ const AeropuertoItem = memo(({ item, onSelect }) => {
 AeropuertoItem.displayName = 'AeropuertoItem';
 
 // Componente optimizado para items de vuelo
-const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
+const VueloItem = memo(({ item, index, aeropuertos, onSelect, calcularProgreso }) => {
     const origenNombre = item.origen?.ciudad
         ? `${item.origen.ciudad}${item.origen.codigo ? ` (${item.origen.codigo})` : ''}`
         : (() => {
@@ -131,6 +129,8 @@ const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
 
     const horaInicio = parsePlanificadorTime(item.horaSalida) || parseBackendTime(item.horaOrigen);
     const horaFin = parsePlanificadorTime(item.horaLlegada) || parseBackendTime(item.horaDestino);
+
+    const progreso = calcularProgreso ? calcularProgreso(horaInicio, horaFin) : 0;
 
     const formatearFecha = (fecha) => {
         if (!fecha) return 'N/A';
@@ -154,7 +154,6 @@ const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
 
     return (
         <div
-            key={item.id || index}
             onClick={() => onSelect(item)}
             style={{
                 padding: '12px',
@@ -185,6 +184,37 @@ const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
             <div style={{ fontSize: 11, color: '#374151' }}>
                 Capacidad: {capacidadOcupada} / {item.capacidadMaxima || 'N/D'} ({capacidadPct}%)
             </div>
+
+            <div style={{ marginTop: 6 }}>
+                <div
+                    style={{
+                        height: 4,
+                        background: '#e5e7eb',
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                    }}
+                >
+                    <div
+                        style={{
+                            width: `${Math.round(progreso)}%`,
+                            height: '100%',
+                            background: '#1976d2',
+                            transition: 'width 0.2s ease-out',
+                        }}
+                    />
+                </div>
+                <div
+                    style={{
+                        marginTop: 2,
+                        fontSize: 10,
+                        color: '#6b7280',
+                        textAlign: 'right',
+                    }}
+                >
+                    Progreso: {Math.round(progreso)}%
+                </div>
+            </div>
+
         </div>
     );
 });
@@ -343,10 +373,7 @@ export default function PanelCatalogos({
 
     const [envios, setEnvios] = useState([]);
     const [cargando, setCargando] = useState(false);
-    const [nowMs, setNowMs] = useState(() => getSimMs());
-
-    // ⚡ OPTIMIZACIÓN: Cache de datos para evitar recálculos
-    const datosCache = useRef({ aeropuertos: [], vuelos: [], lastFetch: 0 });
+    const [nowMs, setNowMs] = useState(() => getSimMs() || Date.now());
 
     // Cargar envíos pendientes cuando se abre el catálogo de rutas
     useEffect(() => {
@@ -379,6 +406,8 @@ export default function PanelCatalogos({
 
     // ✅ Extraer envíos desde vuelosCache, usando historial si no hay actuales
     const extraerEnvios = useCallback((vuelosData) => {
+        if (!nowMs) return [];
+        
         const items = [];
         const BUFFER_MS = 2 * 60 * 1000; // 2 minutos extra tras llegada
         for (const v of vuelosData || []) {
@@ -418,17 +447,11 @@ export default function PanelCatalogos({
         if (!isOpen) return;
 
         const cargarDatos = async () => {
-            // Aeropuertos ya vienen como prop, solo cargar vuelos si es necesario
             if (catalogoActivo === 'aeropuertos') {
-                // No hacer nada, aeropuertos ya están sincronizados
-                return;
+                return; // ya vienen como prop
             }
 
-            // Solo mostrar loading si el cache está vacío
-            const tieneCache = datosCache.current.vuelos.length > 0;
-
-            if (!tieneCache) setCargando(true);
-
+            setCargando(true);
             try {
                 if (catalogoActivo === 'vuelos' || catalogoActivo === 'envios') {
                     await cargarVuelos();
@@ -440,6 +463,7 @@ export default function PanelCatalogos({
 
         cargarDatos();
     }, [catalogoActivo, isOpen, cargarVuelos]);
+
 
     // ✅ Actualizar envíos cuando cambien los vuelos o el tiempo (si usamos fuente interna)
     useEffect(() => {
@@ -531,6 +555,8 @@ export default function PanelCatalogos({
 
     // ⚡ OPTIMIZACIÓN: Memoizar filtrado de vuelos activos
     const vuelosActivos = useMemo(() => {
+        if (!nowMs) return [];
+
         const activos = vuelos.filter(v => {
             const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
             const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
@@ -646,9 +672,11 @@ export default function PanelCatalogos({
                         index={idx}
                         aeropuertos={aeropuertos}
                         onSelect={onSelectVuelo}
+                        calcularProgreso={calcularProgreso}
                     />
                 );
             });
+
         }
 
         if (catalogoActivo === 'envios') {
