@@ -372,6 +372,9 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                         setIsClearing(true);
                     } else if (body.tipo === "clear_map_end") {
                         setIsClearing(false);
+                        if (typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("simulacion:limpiada"));
+                        }
                     }
                     if (body.tipo === "resumen_envios_dia") {
                         setCounts({
@@ -438,6 +441,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
             if (typeof window !== "undefined") {
                 try {
+                    window.dispatchEvent(new Event("simulacion:limpiada"));
                     window.dispatchEvent(new Event("planificador:iniciado"));
                 } catch {
                     // no-op

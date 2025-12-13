@@ -410,7 +410,7 @@ export default function MapaSimDiaria() {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`);
+        const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`, { cache: "no-store" });
         if (!res.ok) throw new Error("fetch aeropuertos " + res.status);
         const data = await res.json();
         if (!mounted) return;
@@ -448,7 +448,7 @@ export default function MapaSimDiaria() {
 
     async function loadUltimoCiclo() {
       try {
-        const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
+        const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`, { cache: "no-store" });
         if (!mounted || cancelled) return;
         if (!res.ok) {
           console.warn("vuelos-ultimo-ciclo HTTP", res.status);
@@ -591,7 +591,7 @@ export default function MapaSimDiaria() {
         const dynamic = dynamicMap[a.id] || {};
         const ilimitado = esAeropuertoPrincipal(a);
         const capacidadMaxima = ilimitado ? null : dynamic.capacidadMaxima ?? a.capacidadMaxima ?? a.capacidad ?? null;
-        const capacidadOcupada = ilimitado ? 0 : dynamic.capacidadOcupada ?? a.capacidadOcupada ?? 0;
+        const capacidadOcupada = ilimitado ? 0 : (dynamic.capacidadOcupada ?? 0);
 
         return {
           id: a.id,
@@ -1017,6 +1017,29 @@ export default function MapaSimDiaria() {
     }
   }, []);
   const handleCerrarAeropuerto = useCallback(() => setAeropuertoDetalle(null), []);
+
+  useEffect(() => {
+    const onClean = () => {
+      // 🔥 borrar todo lo que deja “muestra” visual
+      setDynamicAirports([]);      // capacidades dinámicas
+      setVuelosCache([]);          // vuelos en memoria
+      setRawVuelos([]);            // opcional
+      setHorizonte(null);          // opcional
+
+      // cerrar paneles/selecciones
+      setVueloDetalleCompleto(null);
+      setAeropuertoDetalle(null);
+      setVueloSeleccionado(null);
+      setAeropuertoSeleccionado(null);
+
+      // opcional: volver a modo normal
+      setSoloConEnvios(false);
+    };
+
+    window.addEventListener("simulacion:limpiada", onClean);
+    return () => window.removeEventListener("simulacion:limpiada", onClean);
+  }, []);
+
 
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
