@@ -27,7 +27,7 @@ body {
 }
 
 .btn-primary {
-  padding: 8px 16px;
+  padding: 8px 15px;
   color: #fff;
   background-color: #488DF5;
   border: none;
@@ -50,9 +50,10 @@ body {
   outline-offset: 2px;
 }
 
+.btn-clear,
 .btn-green,
 .btn-red {
-  padding: 8px 16px;
+  padding: 8px 15px;
   border: none;
   border-radius: 8px;
   color: #fff;
@@ -60,6 +61,19 @@ body {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
   transition: all 0.2s ease-in-out;
   font-weight: 500;
+}
+
+.btn-clear {
+  background-color: #7b7878;
+}
+
+.btn-clear:hover {
+  background-color: #f32121;
+}
+
+.btn-clear:focus {
+  outline: 2px solid #1f1c1c;
+  outline-offset: 2px;
 }
 
 .btn-green {

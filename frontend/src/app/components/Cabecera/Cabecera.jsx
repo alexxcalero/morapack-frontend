@@ -27,8 +27,18 @@ export default function Cabecera() {
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="div" sx={{ fontFamily: 'Jockey One, sans-serif', mr: 3 }}>
-            MoraPack
+          <Typography
+            variant="h6"
+            component="div"
+            sx={{ fontFamily: "Jockey One, sans-serif", mr: 3 }}
+          >
+            <Link
+              href="/"
+              style={{ color: "inherit", textDecoration: "none" }}
+              aria-label="Ir al inicio"
+            >
+              MoraPack
+            </Link>
           </Typography>
 
           {/* Enlaces de navegación */}

@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback, Fragment } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, Tooltip, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, useMap, Tooltip, CircleMarker } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import HoraActual from "./HoraActual";
 import { subscribe, getSimMs, isRunning } from "../../../lib/simTime";
-import { fetchVuelos, getCachedFlights } from "../../../lib/vuelos";
 import { Plane, Menu } from "lucide-react";
 import ReactDOMServer from "react-dom/server";
 import SimulationControlsDia from "./SimulationControls";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
+import { useSimulacionDiaSocket } from "@/lib/useSimulacionDiaSocket";
 
 // URL base del backend (misma usada en SimulationControls)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
@@ -26,20 +26,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
-
-const iconUrls = {
-  red: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-  blue: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-  green: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-  violet: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png",
-  orange: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png",
-};
-
-const BlueIcon = L.icon({ iconUrl: iconUrls.blue, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const GreenIcon = L.icon({ iconUrl: iconUrls.green, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const OrangeIcon = L.icon({ iconUrl: iconUrls.orange, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const RedIcon = L.icon({ iconUrl: iconUrls.red, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const UnknownIcon = L.icon({ iconUrl: iconUrls.violet, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
 
 // ✅ ÍCONOS PERSONALIZADOS PARA ALMACENES (respuesta a retroalimentación del profesor)
 // Almacén Principal: Edificio industrial con estrella (Lima, Bruselas, Bakú)
@@ -115,6 +101,8 @@ const AlmacenIntermedioGreenIcon = createAlmacenIntermedioIcon('green');
 const AlmacenIntermedioOrangeIcon = createAlmacenIntermedioIcon('orange');
 const AlmacenIntermedioRedIcon = createAlmacenIntermedioIcon('red');
 const AlmacenIntermedioUnknownIcon = createAlmacenIntermedioIcon('violet');// Controlador para realizar flyTo desde dentro del contexto del mapa
+
+// Controlador para realizar flyTo desde dentro del contexto del mapa
 function SmoothFlyTo({ target }) {
   const map = useMap();
   useEffect(() => {
@@ -122,13 +110,12 @@ function SmoothFlyTo({ target }) {
     const { lat, lon, zoom = 6 } = target;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     try {
-      if (typeof map.stop === 'function') map.stop();
-      // Acercamiento instantáneo sin animación
-      if (typeof map.setView === 'function') {
+      if (typeof map.stop === "function") map.stop();
+      if (typeof map.setView === "function") {
         map.setView([lat, lon], zoom, { animate: false });
       }
     } catch (e) {
-      console.error('❌ setView error:', e);
+      console.error("❌ setView error:", e);
     }
   }, [target, map]);
   return null;
@@ -165,7 +152,7 @@ function parseCoord(raw, { isLat = false, airport = null } = {}) {
     const isDMS = /[0-9]+[-\s:]+[0-9]+/.test(cleaned);
     const value = isDMS ? parseDMSString(cleaned) : parseFloat(cleaned.replace(",", "."));
     if (Number.isNaN(value)) return NaN;
-    return (dir === "S" || dir === "W") ? -Math.abs(value) : Math.abs(value);
+    return dir === "S" || dir === "W" ? -Math.abs(value) : Math.abs(value);
   }
   const maybeNumeric = parseFloat(str.replace(",", "."));
   const looksLikePlainNumber = /^[+\-]?\d+(\.\d+)?$/.test(str.replace(",", "."));
@@ -195,7 +182,8 @@ function parseCoord(raw, { isLat = false, airport = null } = {}) {
       return dec;
     }
   }
-  const cleaned = str.replace(/[^\d\-\+.,]/g, "").replace(",", "."), pf = parseFloat(cleaned);
+  const cleaned = str.replace(/[^\d\-\+.,]/g, "").replace(",", "."),
+    pf = parseFloat(cleaned);
   return Number.isNaN(pf) ? NaN : pf;
 }
 
@@ -204,19 +192,20 @@ function parsePlanificadorTime(s) {
 
   const t = s.trim();
 
-  // 2025-01-02 03:00 (UTC+00:00)  | offset opcional
   const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})(?:\s*\(UTC([+\-]\d{2}):(\d{2})\))?$/);
 
   if (!m) {
-    const d = new Date(t.replace(/\s*\(UTC[^\)]+\)\s*$/, ""));// fallback sin el sufijo
+    const d = new Date(t.replace(/\s*\(UTC[^\)]+\)\s*$/, ""));
     return isNaN(d.getTime()) ? null : d;
   }
 
   const [, datePart, hhStr, mmStr, offHStr = "+00", offMStr = "00"] = m;
-  const [y, mo, day] = datePart.split("-").map(x => parseInt(x, 10));
-  const hh = parseInt(hhStr, 10), mm = parseInt(mmStr, 10);
-  const offH = parseInt(offHStr, 10), offM = parseInt(offMStr, 10);
-  // Interpretar como hora local del huso y convertir a UTC de forma correcta
+  const [y, mo, day] = datePart.split("-").map((x) => parseInt(x, 10));
+  const hh = parseInt(hhStr, 10),
+    mm = parseInt(mmStr, 10);
+  const offH = parseInt(offHStr, 10),
+    offM = parseInt(offMStr, 10);
+
   const sign = offH >= 0 ? 1 : -1;
   const offsetMinutes = Math.abs(offH) * 60 + (offM || 0);
   const totalOffsetMs = sign * offsetMinutes * 60 * 1000;
@@ -227,25 +216,23 @@ function parsePlanificadorTime(s) {
 }
 
 const planeIconCache = {};
-const ICON_SIZE = [28, 28]; // Tamaño aumentado para mejor visibilidad
+const ICON_SIZE = [38, 38];
 
 function getPlaneIcon(color, rotation = 0) {
-  // Redondear rotación a múltiplos de 10° para MÁS cache hits
   const roundedRotation = Math.round(rotation / 10) * 10;
   const cacheKey = `${color}-${roundedRotation}`;
   if (planeIconCache[cacheKey]) return planeIconCache[cacheKey];
 
-  // SVG simple y optimizado (sin elementos extra)
   const svgHtml = ReactDOMServer.renderToString(
     <div
       style={{
         width: ICON_SIZE[0],
         height: ICON_SIZE[1],
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         transform: `rotate(${roundedRotation}deg)`,
-        cursor: 'pointer',
+        cursor: "pointer",
       }}
     >
       <Plane color={color} size={18} strokeWidth={2.5} />
@@ -254,7 +241,7 @@ function getPlaneIcon(color, rotation = 0) {
 
   const icon = L.divIcon({
     html: svgHtml,
-    className: 'plane-icon',
+    className: "plane-icon",
     iconSize: ICON_SIZE,
     iconAnchor: [ICON_SIZE[0] / 2, ICON_SIZE[1] / 2],
   });
@@ -262,33 +249,45 @@ function getPlaneIcon(color, rotation = 0) {
   return icon;
 }
 
-// Función para calcular el ángulo entre dos puntos
 function calcularAngulo(latOrigen, lonOrigen, latDestino, lonDestino) {
   const dLon = lonDestino - lonOrigen;
-  const y = Math.sin(dLon * Math.PI / 180) * Math.cos(latDestino * Math.PI / 180);
-  const x = Math.cos(latOrigen * Math.PI / 180) * Math.sin(latDestino * Math.PI / 180) -
-    Math.sin(latOrigen * Math.PI / 180) * Math.cos(latDestino * Math.PI / 180) * Math.cos(dLon * Math.PI / 180);
-  let angulo = Math.atan2(y, x) * 180 / Math.PI;
-  // Ajustar para que 0° apunte al norte
+  const y = Math.sin((dLon * Math.PI) / 180) * Math.cos((latDestino * Math.PI) / 180);
+  const x =
+    Math.cos((latOrigen * Math.PI) / 180) * Math.sin((latDestino * Math.PI) / 180) -
+    Math.sin((latOrigen * Math.PI) / 180) *
+    Math.cos((latDestino * Math.PI) / 180) *
+    Math.cos((dLon * Math.PI) / 180);
+  let angulo = (Math.atan2(y, x) * 180) / Math.PI;
   angulo = (angulo + 320) % 360;
   return angulo;
 }
 
-// ⭐ Curva geodésica (gran círculo) entre dos coordenadas
-function toRad(deg) { return (deg * Math.PI) / 180; }
-function toDeg(rad) { return (rad * 180) / Math.PI; }
+function toRad(deg) {
+  return (deg * Math.PI) / 180;
+}
+function toDeg(rad) {
+  return (rad * 180) / Math.PI;
+}
 function greatCirclePoints(lat1, lon1, lat2, lon2, segments = 64) {
-  const φ1 = toRad(lat1), λ1 = toRad(lon1);
-  const φ2 = toRad(lat2), λ2 = toRad(lon2); // ✅ FIX: usar lon2, no lonDestino
+  const φ1 = toRad(lat1),
+    λ1 = toRad(lon1);
+  const φ2 = toRad(lat2),
+    λ2 = toRad(lon2);
 
-  const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
-  const sinφ2 = Math.sin(φ2), cosφ2 = Math.cos(φ2);
+  const sinφ1 = Math.sin(φ1),
+    cosφ1 = Math.cos(φ1);
+  const sinφ2 = Math.sin(φ2),
+    cosφ2 = Math.cos(φ2);
   const Δλ = λ2 - λ1;
 
   const hav = Math.sin((φ2 - φ1) / 2) ** 2 + cosφ1 * cosφ2 * Math.sin(Δλ / 2) ** 2;
-  const d = 2 * Math.asin(Math.min(1, Math.sqrt(hav))); // distancia angular
+  const d = 2 * Math.asin(Math.min(1, Math.sqrt(hav)));
 
-  if (d === 0 || !isFinite(d)) return [[lat1, lon1], [lat2, lon2]];
+  if (d === 0 || !isFinite(d))
+    return [
+      [lat1, lon1],
+      [lat2, lon2],
+    ];
 
   const points = [];
   for (let i = 0; i <= segments; i++) {
@@ -308,52 +307,105 @@ function greatCirclePoints(lat1, lon1, lat2, lon2, segments = 64) {
   return points;
 }
 
-// ⭐ Rumbo desde una posición a otra (0° = Norte, horario)
 function calcularRumboActual(lat1, lon1, lat2, lon2) {
-  const φ1 = toRad(lat1), φ2 = toRad(lat2);
+  const φ1 = toRad(lat1),
+    φ2 = toRad(lat2);
   const Δλ = toRad(lon2 - lon1);
   const y = Math.sin(Δλ) * Math.cos(φ2);
   const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-  const θ = Math.atan2(y, x); // -π..π
-  const brng = (toDeg(θ) + 360) % 360; // 0..360, 0=N
+  const θ = Math.atan2(y, x);
+  const brng = (toDeg(θ) + 360) % 360;
   return brng;
 }
 
-// Normaliza rotación asegurando rango 0..360
 function aplicarOffsetRotacion(heading) {
   return (heading + PLANE_ICON_OFFSET_DEG + 360) % 360;
 }
 
-const PLANE_ICON_OFFSET_DEG = -45; // Offset manual (ajústalo): - Si el icono apunta al ESTE (derecha) pon -90 - Si apunta al NORTE ya usa 0 - Si apunta al NORDESTE (45°) prueba -45 o -135
-// Activar debug para ver líneas de heading reales
+const PLANE_ICON_OFFSET_DEG = -45;
 const DEBUG_HEADING = false;
 
 export default function MapaSimDiaria() {
   const mapRef = useRef(null);
   const fechaInicioSimRef = useRef(null);
+
+  // 🔹 Catálogo estático REST
   const [rawAirports, setRawAirports] = useState(null);
+  // 🔹 Estado dinámico de aeropuertos (capacidad, etc.) STOMP/planificador
+  const [dynamicAirports, setDynamicAirports] = useState(null);
+
   const [aeropuertoSeleccionado, setAeropuertoSeleccionado] = useState(null);
-  const [dynamicAirports, setDynamicAirports] = useState(null); // ← aeropuertos desde /vuelos-ultimo-ciclo
   const [rawVuelos, setRawVuelos] = useState(null);
-  const [vuelosCache, setVuelosCache] = useState([]); // ← NUEVO: caché local de vuelos
+  const [vuelosCache, setVuelosCache] = useState([]);
   const [vueloSeleccionado, setVueloSeleccionado] = useState(null);
   const [soloConEnvios, setSoloConEnvios] = useState(false);
-  const [horizonte, setHorizonte] = useState(null); // ← nuevo
+  const [horizonte, setHorizonte] = useState(null);
   const [navegando, setNavegando] = useState(false);
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [vueloDetalleCompleto, setVueloDetalleCompleto] = useState(null);
   const [aeropuertoDetalle, setAeropuertoDetalle] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
 
-  // No inicialices initSim aquí: HoraActual es quien controla startMs.
-  // Suscripción global a tiempo de simulación
+
+  useEffect(() => {
+    const autostart = async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/api/planificador/autostart-simulacion-dia`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => null);
+          console.error(
+            "[autostart] HTTP " + resp.status + (txt ? " - " + txt : "")
+          );
+          return;
+        }
+
+        const data = await resp.json().catch(() => ({}));
+        console.log("[autostart] respuesta:", data);
+        // Aquí podrías, si quieres, sincronizar algo con el front
+        // (por ejemplo, si te devuelve simMs)
+      } catch (err) {
+        console.error("[autostart] error llamando al backend:", err);
+      }
+    };
+
+    autostart();
+  }, []);
+
+  // Tiempo simulado
   const [nowMs, setNowMs] = useState(() => getSimMs());
   useEffect(() => {
-    const unsub = subscribe(ms => setNowMs(ms));
+    const unsub = subscribe((ms) => setNowMs(ms));
     return () => unsub();
   }, []);
 
-  // cargar aeropuertos (unchanged)
+  // 🔔 STOMP: recibir actualizaciones en tiempo real
+  // Soporta:
+  //  - payload = array (solo vuelos)
+  //  - payload = { vuelos, aeropuertos } (vuelos + aeropuertos dinámicos)
+  useSimulacionDiaSocket((payload) => {
+    if (Array.isArray(payload)) {
+      // Compatibilidad retro: solo lista de vuelos
+      setVuelosCache(payload);
+      return;
+    }
+    if (payload && typeof payload === "object") {
+      if (Array.isArray(payload.vuelos)) {
+        setVuelosCache(payload.vuelos);
+      }
+      if (Array.isArray(payload.aeropuertos)) {
+        // Actualizar capacidades dinámicas de aeropuertos desde STOMP
+        setDynamicAirports(payload.aeropuertos);
+      }
+    }
+  });
+
+  // 🌍 REST: catálogo base de aeropuertos (coordenadas, país, etc.)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -363,16 +415,20 @@ export default function MapaSimDiaria() {
         const data = await res.json();
         if (!mounted) return;
         setRawAirports(data);
+
+        // Ajustar bounds iniciales del mapa
         setTimeout(() => {
           if (mapRef.current && Array.isArray(data) && data.length) {
             const pts = data
-              .map(a => {
+              .map((a) => {
                 const lat = parseCoord(a.latitud ?? a.lat ?? a.latitude, { isLat: true, airport: a });
                 const lon = parseCoord(a.longitud ?? a.lon ?? a.longitude, { isLat: false, airport: a });
                 return Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon] : null;
               })
               .filter(Boolean);
-            try { if (pts.length) mapRef.current.fitBounds(pts, { padding: [30, 30] }); } catch (e) { }
+            try {
+              if (pts.length) mapRef.current.fitBounds(pts, { padding: [30, 30] });
+            } catch (e) { }
           }
         }, 120);
       } catch (err) {
@@ -380,10 +436,12 @@ export default function MapaSimDiaria() {
         if (mounted) setRawAirports([]);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // 🔁 Cargar vuelos desde el planificador (último ciclo) y refrescar periódicamente
+  // 🔁 REST: ciclos del planificador (para vuelos + aeropuertos dinámicos como respaldo)
   useEffect(() => {
     let mounted = true;
     let cancelled = false;
@@ -401,33 +459,24 @@ export default function MapaSimDiaria() {
         setHorizonte(data?.horizonte || null);
         const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
 
-        // ✅ NUEVO: Actualizar aeropuertos dinámicos con capacidades desde backend
+        // ✅ también actualiza aeropuertos dinámicos desde REST como backup
         if (Array.isArray(data?.aeropuertos)) {
           setDynamicAirports(data.aeropuertos);
         }
 
-        // ✅ FUSIONAR: Preservar vuelos del cache que aún están volando
-        setVuelosCache(prev => {
-          // ⚠️ IMPORTANTE: Usar tiempo de SIMULACIÓN, no tiempo real del sistema
+        setVuelosCache((prev) => {
           const ahoraSimulacion = getSimMs();
-          const margenSeguridad = 5 * 60 * 1000; // 5 minutos de margen para evitar desapariciones abruptas
+          const margenSeguridad = 5 * 60 * 1000;
 
-          // Mantener vuelos antiguos que aún NO han llegado a destino (según tiempo de simulación)
-          const vuelosVigentes = prev.filter(v => {
+          const vuelosVigentes = prev.filter((v) => {
             const llegada = parsePlanificadorTime(v.horaLlegada);
-            // Mantener si la hora de llegada aún no ha pasado (con margen de seguridad)
-            return llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
+            return llegada && llegada.getTime() > ahoraSimulacion - margenSeguridad;
           });
 
-          // Crear mapa de IDs de vuelos nuevos
-          const idsNuevos = new Set(vuelosNuevos.map(v => v.id));
+          const idsNuevos = new Set(vuelosNuevos.map((v) => v.id));
+          const vuelosAntiguos = vuelosVigentes.filter((v) => !idsNuevos.has(v.id));
 
-          // Mantener vuelos antiguos que NO están en el nuevo array (y aún están volando)
-          const vuelosAntiguos = vuelosVigentes.filter(v => !idsNuevos.has(v.id));
-
-          // Memoria local: historial de vuelos que alguna vez tuvieron envíos (preservar objetos completos)
           const historialEnvios = {};
-          // Cargar historial previo (preservar objetos de envío, no solo IDs)
           for (const v of prev) {
             if (Array.isArray(v.__historialEnviosCompletos)) {
               historialEnvios[v.id] = [...v.__historialEnviosCompletos];
@@ -436,15 +485,15 @@ export default function MapaSimDiaria() {
             }
           }
 
-          // Marcar en los vuelos nuevos si alguna vez tuvieron envíos asignados
-          const vuelosNuevosMarcados = vuelosNuevos.map(v => {
+          const vuelosNuevosMarcados = vuelosNuevos.map((v) => {
             let __tuvoEnvios = false;
             let __historialEnviosCompletos = historialEnvios[v.id] || [];
-            let __historialEnviosIds = new Set(__historialEnviosCompletos.map(e => e.envioId ?? e.id ?? e.envio_id));
+            let __historialEnviosIds = new Set(
+              __historialEnviosCompletos.map((e) => e.envioId ?? e.id ?? e.envio_id)
+            );
 
             if (Array.isArray(v.enviosAsignados) && v.enviosAsignados.length > 0) {
               __tuvoEnvios = true;
-              // Agregar nuevos envíos al historial si no están ya
               for (const e of v.enviosAsignados) {
                 const eId = e.envioId ?? e.id ?? e.envio_id;
                 if (!__historialEnviosIds.has(eId)) {
@@ -459,29 +508,16 @@ export default function MapaSimDiaria() {
               ...v,
               __tuvoEnvios,
               __historialEnvios: Array.from(__historialEnviosIds),
-              __historialEnviosCompletos
+              __historialEnviosCompletos,
             };
           });
 
-          // Combinar: nuevos + antiguos que siguen volando
           const resultado = [...vuelosNuevosMarcados, ...vuelosAntiguos];
-
-          if (vuelosAntiguos.length > 0) {
-            console.log(`🔄 Caché actualizado: ${vuelosNuevos.length} nuevos + ${vuelosAntiguos.length} anteriores = ${resultado.length} total`);
-            console.log(`✈️ Vuelos antiguos mantenidos:`, vuelosAntiguos.map(v => `#${v.id} (llega: ${v.horaLlegada})`));
-          }
-
-          // Log de vuelos con historial de envíos
-          const vuelosConHistorial = resultado.filter(v => v.__historialEnviosCompletos?.length > 0);
-          if (vuelosConHistorial.length > 0) {
-            console.log(`📦 Vuelos con historial de envíos:`, vuelosConHistorial.map(v => `#${v.id} (${v.__historialEnviosCompletos.length} envíos históricos, ${v.enviosAsignados?.length || 0} actuales)`));
-          }
 
           return resultado;
         });
 
         setRawVuelos(vuelosNuevos);
-        console.log('✈️ Vuelos procesados:', vuelosNuevos.length);
       } catch (err) {
         console.error("fetch vuelos-ultimo-ciclo:", err);
         if (mounted) setRawVuelos([]);
@@ -489,87 +525,88 @@ export default function MapaSimDiaria() {
     }
 
     loadUltimoCiclo();
-    const iv = setInterval(loadUltimoCiclo, 10_000); // consultar vuelos-ultimo-ciclo cada 10 seg
-    // Escuchar inicio explícito del planificador para refrescar inmediatamente
+    const iv = setInterval(loadUltimoCiclo, 10_000);
     const onPlanificadorIniciado = () => {
-      // Refresco inmediato y un par de reintentos rápidos para capturar datos recientes
       loadUltimoCiclo();
       setTimeout(loadUltimoCiclo, 1500);
       setTimeout(loadUltimoCiclo, 3500);
     };
-    try { window.addEventListener('planificador:iniciado', onPlanificadorIniciado); } catch { }
+    try {
+      window.addEventListener("planificador:iniciado", onPlanificadorIniciado);
+    } catch { }
 
     return () => {
-      mounted = false; cancelled = true; clearInterval(iv);
-      try { window.removeEventListener('planificador:iniciado', onPlanificadorIniciado); } catch { }
+      mounted = false;
+      cancelled = true;
+      clearInterval(iv);
+      try {
+        window.removeEventListener("planificador:iniciado", onPlanificadorIniciado);
+      } catch { }
     };
   }, []);
 
-  // Resetear estado cuando se inicia nueva simulación
   useEffect(() => {
     if (isRunning()) {
       fechaInicioSimRef.current = null;
     }
-  }, [horizonte?.inicio]); // Cuando cambia el horizonte, es una nueva simulación
+  }, [horizonte?.inicio]);
 
-  // ✅ Aeropuertos base (sin capacidades dinámicas calculadas)
-  // Detectar aeropuertos principales (ilimitados): Lima, Bruselas, Bakú
   const esAeropuertoPrincipal = useCallback((a) => {
     const ciudad = String(a.ciudad ?? a.raw?.ciudad ?? "").toLowerCase();
     const codigo = String(a.codigo ?? a.abreviatura ?? a.raw?.codigo ?? "").toLowerCase();
     return (
       ciudad.includes("lima") ||
-      ciudad.includes("brus") || // Brussels / Bruselas
+      ciudad.includes("brus") ||
       ciudad.includes("baku") ||
       codigo === "spim" ||
       codigo === "spjc" ||
-      codigo.startsWith("eb") || // EBBR, etc.
+      codigo.startsWith("eb") ||
       codigo === "gyd" ||
       codigo === "ubbb"
     );
   }, []);
 
-  // GRAFICAR aeropuertos dinámicos
+  // 🧩 Fusionar catálogo REST (rawAirports) + capacidades dinámicas (dynamicAirports)
   const airportsBase = useMemo(() => {
     if (!Array.isArray(rawAirports)) return [];
 
-    // Crear mapa de capacidades dinámicas desde backend
     const dynamicMap = {};
     if (Array.isArray(dynamicAirports)) {
-      dynamicAirports.forEach(a => {
+      dynamicAirports.forEach((a) => {
         const id = a.id ?? a.idAeropuerto;
         if (id != null) {
           dynamicMap[id] = {
             capacidadOcupada: a.capacidadOcupada ?? 0,
-            capacidadMaxima: a.capacidadMaxima ?? a.capacidad ?? null
+            capacidadMaxima: a.capacidadMaxima ?? a.capacidad ?? null,
           };
         }
       });
     }
 
-    return rawAirports.map(a => {
-      const lat = parseCoord(a.latitud ?? a.lat ?? a.latitude, { isLat: true, airport: a });
-      const lon = parseCoord(a.longitud ?? a.lon ?? a.longitude, { isLat: false, airport: a });
+    return rawAirports
+      .map((a) => {
+        const lat = parseCoord(a.latitud ?? a.lat ?? a.latitude, { isLat: true, airport: a });
+        const lon = parseCoord(a.longitud ?? a.lon ?? a.longitude, { isLat: false, airport: a });
 
-      // Usar capacidades dinámicas del backend si existen, sino usar estáticas
-      const dynamic = dynamicMap[a.id] || {};
-      const ilimitado = esAeropuertoPrincipal(a);
-      const capacidadMaxima = ilimitado ? null : (dynamic.capacidadMaxima ?? a.capacidadMaxima ?? a.capacidad ?? null);
-      const capacidadOcupada = ilimitado ? 0 : (dynamic.capacidadOcupada ?? a.capacidadOcupada ?? 0);
+        const dynamic = dynamicMap[a.id] || {};
+        const ilimitado = esAeropuertoPrincipal(a);
+        const capacidadMaxima = ilimitado ? null : dynamic.capacidadMaxima ?? a.capacidadMaxima ?? a.capacidad ?? null;
+        const capacidadOcupada = ilimitado ? 0 : dynamic.capacidadOcupada ?? a.capacidadOcupada ?? 0;
 
-      return {
-        id: a.id,
-        codigo: a.codigo ?? a.abreviatura ?? "",
-        ciudad: a.ciudad ?? "",
-        pais: a.pais?.nombre ?? "",
-        lat,
-        lon,
-        capacidadMaxima,
-        capacidadOcupada,
-        ilimitado,
-        raw: a
-      };
-    }).filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon));
+        return {
+          id: a.id,
+          codigo: a.codigo ?? a.abreviatura ?? "",
+          ciudad: a.ciudad ?? "",
+          pais: a.pais?.nombre ?? "",
+          lat,
+          lon,
+          capacidadMaxima,
+          capacidadOcupada,
+          ilimitado,
+          raw: a,
+        };
+      })
+      .filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lon));
   }, [rawAirports, dynamicAirports, esAeropuertoPrincipal]);
 
   const airportsById = useMemo(() => {
@@ -578,54 +615,68 @@ export default function MapaSimDiaria() {
     return map;
   }, [airportsBase]);
 
-  // Mapear respuesta usando vuelosCache en lugar de rawVuelos
   const vuelos = useMemo(() => {
     if (!Array.isArray(vuelosCache)) return [];
 
-    return vuelosCache.map(p => {
-      // origen/destino vienen como objetos { id, codigo, ciudad, pais }
-      const origenAirport = p.origen?.id && airportsById[p.origen.id] ? airportsById[p.origen.id] : null;
-      const destinoAirport = p.destino?.id && airportsById[p.destino.id] ? airportsById[p.destino.id] : null;
+    return vuelosCache
+      .map((p) => {
+        const origenAirport = p.origen?.id && airportsById[p.origen.id] ? airportsById[p.origen.id] : null;
+        const destinoAirport = p.destino?.id && airportsById[p.destino.id] ? airportsById[p.destino.id] : null;
 
-      const latOrigen = origenAirport?.lat;
-      const lonOrigen = origenAirport?.lon;
-      const latDestino = destinoAirport?.lat;
-      const lonDestino = destinoAirport?.lon;
+        const latOrigen = origenAirport?.lat;
+        const lonOrigen = origenAirport?.lon;
+        const latDestino = destinoAirport?.lat;
+        const lonDestino = destinoAirport?.lon;
 
-      // horas estilo "yyyy-MM-dd HH:mm (UTC±hh:mm)"
-      const horaOrigen = parsePlanificadorTime(p.horaSalida) || null;
-      const horaDestino = parsePlanificadorTime(p.horaLlegada) || null;
+        const horaOrigen = parsePlanificadorTime(p.horaSalida) || null;
+        const horaDestino = parsePlanificadorTime(p.horaLlegada) || null;
 
-      // ✅ Calcular capacidad ocupada sumando cantidades de envíos asignados
-      const enviosAsignados = Array.isArray(p.enviosAsignados) ? p.enviosAsignados : [];
-      const capacidadOcupada = enviosAsignados.reduce((sum, e) => {
-        const cant = e.cantidad ?? e.cantidadAsignada ?? 0;
-        return sum + cant;
-      }, 0);
+        const enviosAsignados = Array.isArray(p.enviosAsignados) ? p.enviosAsignados : [];
+        const capacidadOcupada = enviosAsignados.reduce((sum, e) => {
+          const cant = e.cantidad ?? e.cantidadAsignada ?? 0;
+          return sum + cant;
+        }, 0);
 
-      return {
-        raw: { ...p, capacidadOcupada },
-        idTramo: p.id ?? p.vueloBaseId ?? null,
-        latOrigen, lonOrigen, latDestino, lonDestino,
-        horaOrigen, horaDestino,
-        ciudadOrigenId: p.origen?.id, ciudadDestinoId: p.destino?.id,
-        ciudadOrigenName: p.origen?.ciudad, ciudadDestinoName: p.destino?.ciudad
-      };
-    }).filter(v =>
-      Number.isFinite(v.latOrigen) && Number.isFinite(v.lonOrigen) &&
-      Number.isFinite(v.latDestino) && Number.isFinite(v.lonDestino) &&
-      v.horaOrigen instanceof Date && !isNaN(v.horaOrigen.getTime()) &&
-      v.horaDestino instanceof Date && !isNaN(v.horaDestino.getTime())
-    );
-  }, [vuelosCache, airportsById]); // ← cambiar rawVuelos por vuelosCache
+        return {
+          raw: { ...p, capacidadOcupada },
+          idTramo: p.id ?? p.vueloBaseId ?? null,
+          latOrigen,
+          lonOrigen,
+          latDestino,
+          lonDestino,
+          horaOrigen,
+          horaDestino,
+          ciudadOrigenId: p.origen?.id,
+          ciudadDestinoId: p.destino?.id,
+          ciudadOrigenName: p.origen?.ciudad,
+          ciudadDestinoName: p.destino?.ciudad,
+        };
+      })
+      .filter(
+        (v) =>
+          Number.isFinite(v.latOrigen) &&
+          Number.isFinite(v.lonOrigen) &&
+          Number.isFinite(v.latDestino) &&
+          Number.isFinite(v.lonDestino) &&
+          v.horaOrigen instanceof Date &&
+          !isNaN(v.horaOrigen.getTime()) &&
+          v.horaDestino instanceof Date &&
+          !isNaN(v.horaDestino.getTime())
+      );
+  }, [vuelosCache, airportsById]);
 
   const calcularPosicion = (vuelo, nowMsLocal) => {
-    const latA = vuelo.latOrigen; const lonA = vuelo.lonOrigen; const latB = vuelo.latDestino; const lonB = vuelo.lonDestino;
-    const inicio = vuelo.horaOrigen; const fin = vuelo.horaDestino;
+    const latA = vuelo.latOrigen,
+      lonA = vuelo.lonOrigen,
+      latB = vuelo.latDestino,
+      lonB = vuelo.lonDestino;
+    const inicio = vuelo.horaOrigen,
+      fin = vuelo.horaDestino;
     const ahora = new Date(nowMsLocal ?? getSimMs());
     const total = fin - inicio;
     if (!isFinite(total) || total === 0) return { lat: latB, lon: lonB, progreso: 1 };
-    let t = (ahora - inicio) / total; t = Math.max(0, Math.min(1, t));
+    let t = (ahora - inicio) / total;
+    t = Math.max(0, Math.min(1, t));
     return { lat: latA + (latB - latA) * t, lon: lonA + (lonB - lonA) * t, progreso: t };
   };
 
@@ -649,30 +700,24 @@ export default function MapaSimDiaria() {
     return AlmacenIntermedioRedIcon;
   }
 
-  // ✅ Usar aeropuertos con capacidades actualizadas desde el backend
-  // El backend envía las capacidades reales cuando los aviones aterrizan y descargan
+
   const airports = useMemo(() => {
     if (!Array.isArray(airportsBase)) return [];
-
-    // Simplemente calcular el porcentaje con los datos que ya vienen del backend
-    return airportsBase.map(a => {
+    return airportsBase.map((a) => {
       const porcentaje = a.ilimitado
         ? null
-        : ((typeof a.capacidadMaxima === "number" && a.capacidadMaxima > 0)
+        : typeof a.capacidadMaxima === "number" && a.capacidadMaxima > 0
           ? Math.round((a.capacidadOcupada / a.capacidadMaxima) * 100)
-          : null);
-
+          : null;
       return {
         ...a,
-        porcentaje
+        porcentaje,
       };
     });
   }, [airportsBase]);
 
-  const center = airports.length ?
-    [airports[0].lat, airports[0].lon] : [-12.0464, -77.0428];
+  const center = airports.length ? [airports[0].lat, airports[0].lon] : [-12.0464, -77.0428];
 
-  // ⚡ OPTIMIZACIÓN: Throttle de actualización de posiciones (cada ~100ms en lugar de cada frame)
   const [throttledNowMs, setThrottledNowMs] = useState(nowMs);
   useEffect(() => {
     const delay = navegando ? 300 : 100;
@@ -680,52 +725,59 @@ export default function MapaSimDiaria() {
     return () => clearTimeout(timer);
   }, [nowMs, navegando]);
 
-  // Renderizar TODOS los vuelos activos sin límite
   const vuelosFiltrados = useMemo(() => {
     if (!Array.isArray(vuelos)) return [];
     const ahoraMs = throttledNowMs;
-    const BUFFER_MS = 2 * 60 * 1000; // 2 minutos extra tras llegada
-    const list = vuelos.map(v => {
-      if (!(v.horaOrigen instanceof Date) || !(v.horaDestino instanceof Date)) return null;
-      if (ahoraMs < v.horaOrigen.getTime()) return null;
-      // Permitir que el vuelo siga visible hasta 2 minutos después de la llegada
-      if (ahoraMs >= v.horaDestino.getTime() + BUFFER_MS) return null;
+    const BUFFER_MS = 2 * 60 * 1000;
+    const list = vuelos
+      .map((v) => {
+        if (!(v.horaOrigen instanceof Date) || !(v.horaDestino instanceof Date)) return null;
+        if (ahoraMs < v.horaOrigen.getTime()) return null;
+        if (ahoraMs >= v.horaDestino.getTime() + BUFFER_MS) return null;
+        const pos = calcularPosicion(v, ahoraMs);
+        if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
+        const tieneEnvios = Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0;
+        const heading = calcularRumboActual(pos.lat, pos.lon, v.latDestino, v.lonDestino);
+        const rotation = aplicarOffsetRotacion(heading);
+        return { ...v, pos, heading, rotation, tieneEnvios };
+      })
+      .filter(Boolean);
 
-      const pos = calcularPosicion(v, ahoraMs);
-      if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
-
-      const tieneEnvios = Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0;
-
-      const heading = calcularRumboActual(pos.lat, pos.lon, v.latDestino, v.lonDestino);
-      const rotation = aplicarOffsetRotacion(heading);
-      return { ...v, pos, heading, rotation, tieneEnvios };
-    }).filter(Boolean);
-
-    // Priorizar los que tienen envíos (para mejor visualización)
     list.sort((a, b) => {
       if (a.tieneEnvios === b.tieneEnvios) return a.idTramo - b.idTramo;
       return a.tieneEnvios ? -1 : 1;
     });
 
     if (soloConEnvios) {
-      // Mostrar vuelos que tienen o tuvieron envíos durante el buffer
-      return list.filter(v => v.tieneEnvios || v.raw?.__tuvoEnvios);
+      return list.filter((v) => v.tieneEnvios || v.raw?.__tuvoEnvios);
     }
     return list;
-  }, [vuelos, throttledNowMs, calcularPosicion, soloConEnvios]);
+  }, [vuelos, throttledNowMs, soloConEnvios]);
 
-  // Solo vuelos en el aire que sí tienen envíos (para el catálogo)
+  const vuelosFiltradosUnicos = useMemo(() => {
+    if (!Array.isArray(vuelosFiltrados)) return [];
+    const seen = new Set();
+    const res = [];
+    for (const v of vuelosFiltrados) {
+      const key = v.idTramo ?? v.raw?.id;
+      if (key == null) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      res.push(v);
+    }
+    return res;
+  }, [vuelosFiltrados]);
+
   const vuelosConEnvios = useMemo(() => {
-    return vuelosFiltrados.filter(v => v.tieneEnvios);
-  }, [vuelosFiltrados]); // ← ya depende de vuelosFiltrados que incluye nowMs
+    return vuelosFiltrados.filter((v) => v.tieneEnvios);
+  }, [vuelosFiltrados]);
 
-  // Envíos en circulación (sigue igual, usa vuelosFiltrados que ya incluye todos; solo añade los que realmente tienen envíos)
   const enviosEnCirculacion = useMemo(() => {
     const items = [];
     for (const v of vuelosFiltrados || []) {
       if (!v.tieneEnvios) continue;
       const asign = Array.isArray(v.raw?.enviosAsignados) ? v.raw.enviosAsignados : [];
-      asign.forEach(a => {
+      asign.forEach((a) => {
         const envioId = a.envioId ?? a.id ?? a.envio_id;
         const cantidad = a.cantidad ?? a.cantidadAsignada ?? a.qty ?? 0;
         items.push({
@@ -733,7 +785,7 @@ export default function MapaSimDiaria() {
           cantidad,
           vueloId: v.idTramo,
           origen: v.ciudadOrigenName || v.raw?.origen?.codigo || v.raw?.origen?.ciudad || "",
-          destino: v.ciudadDestinoName || v.raw?.destino?.codigo || v.raw?.destino?.ciudad || ""
+          destino: v.ciudadDestinoName || v.raw?.destino?.codigo || v.raw?.destino?.ciudad || "",
         });
       });
     }
@@ -745,123 +797,131 @@ export default function MapaSimDiaria() {
     return Array.from(map.values());
   }, [vuelosFiltrados]);
 
-  // ✅ Mover handleSelectVuelo arriba (se usará luego en handleSelectEnvio)
-  const handleSelectVuelo = useCallback((vueloData, shouldZoom = false) => {
-    console.log('📍 Vuelo seleccionado - datos recibidos:', vueloData);
+  const handleSelectVuelo = useCallback(
+    (vueloData, shouldZoom = false) => {
+      console.log("📍 Vuelo seleccionado - datos recibidos:", vueloData);
 
-    // Cerrar panel de aeropuerto y deseleccionar aeropuerto
-    setAeropuertoDetalle(null);
-    setAeropuertoSeleccionado(null);
+      setAeropuertoDetalle(null);
+      setAeropuertoSeleccionado(null);
 
-    // Buscar en vuelosFiltrados primero (que ya tienen pos calculada)
-    let vueloCompleto = vuelosFiltrados.find(v =>
-      v.idTramo === vueloData.id ||
-      v.idTramo === vueloData.idTramo ||
-      v.raw.id === vueloData.id
-    );
-
-    // Si no se encuentra en filtrados, buscar en vuelos completos
-    if (!vueloCompleto) {
-      const vueloBase = vuelos.find(v =>
-        v.idTramo === vueloData.id ||
-        v.idTramo === vueloData.idTramo ||
-        v.raw.id === vueloData.id
+      let vueloCompleto = vuelosFiltrados.find(
+        (v) =>
+          v.idTramo === vueloData.id ||
+          v.idTramo === vueloData.idTramo ||
+          v.raw.id === vueloData.id
       );
 
-      if (vueloBase) {
-        const pos = calcularPosicion(vueloBase, nowMs);
-        const heading = calcularRumboActual(pos.lat, pos.lon, vueloBase.latDestino, vueloBase.lonDestino);
-        vueloCompleto = { ...vueloBase, pos, heading, rotation: aplicarOffsetRotacion(heading) };
+      if (!vueloCompleto) {
+        const vueloBase = vuelos.find(
+          (v) =>
+            v.idTramo === vueloData.id ||
+            v.idTramo === vueloData.idTramo ||
+            v.raw.id === vueloData.id
+        );
+
+        if (vueloBase) {
+          const pos = calcularPosicion(vueloBase, nowMs);
+          const heading = calcularRumboActual(pos.lat, pos.lon, vueloBase.latDestino, vueloBase.lonDestino);
+          vueloCompleto = { ...vueloBase, pos, heading, rotation: aplicarOffsetRotacion(heading) };
+        }
       }
-    }
 
-    if (!vueloCompleto) {
-      console.warn('⚠️ No se encontró el vuelo en la lista', vueloData);
-      return;
-    }
+      if (!vueloCompleto) {
+        console.warn("⚠️ No se encontró el vuelo en la lista", vueloData);
+        return;
+      }
 
-    console.log('✅ Vuelo encontrado:', vueloCompleto);
+      const { pos } = vueloCompleto;
+      if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) {
+        console.warn("⚠️ Posición inválida del vuelo");
+        return;
+      }
 
-    const { pos } = vueloCompleto;
+      const detalleParaPanel = {
+        ...vueloCompleto,
+        pos: { ...pos },
+        timestamp: Date.now(),
+      };
 
-    if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) {
-      console.warn('⚠️ Posición inválida del vuelo');
-      return;
-    }
+      setVueloDetalleCompleto(detalleParaPanel);
+      setVueloSeleccionado(vueloCompleto.idTramo);
 
-    // ⭐ IMPORTANTE: Actualizar estados ANTES de verificar mapRef
-    const detalleParaPanel = {
-      ...vueloCompleto,
-      pos: { ...pos },
-      timestamp: Date.now()
-    };
+      if (shouldZoom && Number.isFinite(pos.lat) && Number.isFinite(pos.lon)) {
+        setFlyTarget({ lat: pos.lat, lon: pos.lon, zoom: 6, t: Date.now() });
+        setTimeout(() => setFlyTarget(null), 100);
+      }
+    },
+    [vuelos, vuelosFiltrados, nowMs, calcularPosicion]
+  );
 
-    console.log('🔧 Estableciendo vueloDetalleCompleto:', detalleParaPanel);
-    setVueloDetalleCompleto(detalleParaPanel);
-    setVueloSeleccionado(vueloCompleto.idTramo);
+  const handleSelectEnvio = useCallback(
+    (envio) => {
+      const envioObj = typeof envio === "object" ? envio : { envioId: envio };
+      const normalizeId = (x) => (x == null ? null : String(x));
 
-    // Acercar el mapa al vuelo solo si se indica (cuando viene del catálogo)
-    if (shouldZoom && Number.isFinite(pos.lat) && Number.isFinite(pos.lon)) {
-      console.log('✅ Configurando zoom a vuelo:', [pos.lat, pos.lon]);
-      setFlyTarget({ lat: pos.lat, lon: pos.lon, zoom: 6, t: Date.now() });
-      // Limpiar flyTarget después del zoom para evitar re-renders
-      setTimeout(() => setFlyTarget(null), 100);
-    }
-  }, [vuelos, vuelosFiltrados, nowMs, calcularPosicion]);
-
-  // Callback para seleccionar vuelo desde el panel
-  const handleSelectEnvio = useCallback((envio) => {
-    const envioObj = typeof envio === "object" ? envio : { envioId: envio };
-    const normalizeId = (x) => (x == null ? null : String(x));
-
-    // 1) Si viene vueloId desde el catálogo, usarlo directamente (más confiable y rápido)
-    const targetVueloIdStr = normalizeId(envioObj.vueloId);
-    if (targetVueloIdStr) {
-      // Buscar primero en vuelos mapeados (vuelos con pos calculada al pedirlos)
-      let v = vuelos.find(vu => normalizeId(vu.raw?.id) === targetVueloIdStr || normalizeId(vu.idTramo) === targetVueloIdStr);
-      if (!v) {
-        // Buscar en el cache crudo del último ciclo
-        const vc = vuelosCache.find(vu => normalizeId(vu.id) === targetVueloIdStr);
-        if (vc) {
-          handleSelectVuelo({ id: vc.id, idTramo: vc.id, ...vc }, true);
+      const targetVueloIdStr = normalizeId(envioObj.vueloId);
+      if (targetVueloIdStr) {
+        let v = vuelos.find(
+          (vu) =>
+            normalizeId(vu.raw?.id) === targetVueloIdStr ||
+            normalizeId(vu.idTramo) === targetVueloIdStr
+        );
+        if (!v) {
+          const vc = vuelosCache.find(
+            (vu) => normalizeId(vu.id) === targetVueloIdStr
+          );
+          if (vc) {
+            handleSelectVuelo({ id: vc.id, idTramo: vc.id, ...vc }, true);
+            return;
+          }
+        } else {
+          handleSelectVuelo({ id: v.idTramo, idTramo: v.idTramo, ...v.raw }, true);
           return;
         }
-      } else {
-        handleSelectVuelo({ id: v.idTramo, idTramo: v.idTramo, ...v.raw }, true);
-        return;
-      }
-    }
-
-    // 2) Fallback: buscar por envioId dentro de los vuelos (en mapeados y crudos)
-    const envioId = envioObj.envioId ?? envioObj.id;
-    if (envioId != null) {
-      const vMap = vuelos.find(x => Array.isArray(x.raw?.enviosAsignados) && x.raw.enviosAsignados.some(a => normalizeId(a.envioId ?? a.id) === normalizeId(envioId)));
-      if (vMap) {
-        handleSelectVuelo({ id: vMap.idTramo, idTramo: vMap.idTramo, ...vMap.raw }, true);
-        return;
       }
 
-      const vCache = vuelosCache.find(x => Array.isArray(x.enviosAsignados) && x.enviosAsignados.some(a => normalizeId(a.envioId ?? a.id) === normalizeId(envioId)));
-      if (vCache) {
-        handleSelectVuelo({ id: vCache.id, idTramo: vCache.id, ...vCache }, true);
-        return;
-      }
-    }
+      const envioId = envioObj.envioId ?? envioObj.id;
+      if (envioId != null) {
+        const vMap = vuelos.find(
+          (x) =>
+            Array.isArray(x.raw?.enviosAsignados) &&
+            x.raw.enviosAsignados.some(
+              (a) => normalizeId(a.envioId ?? a.id) === normalizeId(envioId)
+            )
+        );
+        if (vMap) {
+          handleSelectVuelo({ id: vMap.idTramo, idTramo: vMap.idTramo, ...vMap.raw }, true);
+          return;
+        }
 
-    console.warn("No se pudo localizar el vuelo para el envío", envioObj);
-  }, [vuelos, vuelosCache, handleSelectVuelo]);
+        const vCache = vuelosCache.find(
+          (x) =>
+            Array.isArray(x.enviosAsignados) &&
+            x.enviosAsignados.some(
+              (a) => normalizeId(a.envioId ?? a.id) === normalizeId(envioId)
+            )
+        );
+        if (vCache) {
+          handleSelectVuelo({ id: vCache.id, idTramo: vCache.id, ...vCache }, true);
+          return;
+        }
+      }
+
+      console.warn("No se pudo localizar el vuelo para el envío", envioObj);
+    },
+    [vuelos, vuelosCache, handleSelectVuelo]
+  );
 
   const selectedRuta = useMemo(() => {
     if (!vueloSeleccionado) return null;
     const v =
-      vuelosFiltrados.find(x => x.idTramo === vueloSeleccionado) ||
-      vuelos.find(x => x.idTramo === vueloSeleccionado);
+      vuelosFiltrados.find((x) => x.idTramo === vueloSeleccionado) ||
+      vuelos.find((x) => x.idTramo === vueloSeleccionado);
     if (!v) return null;
     const pos = calcularPosicion(v, nowMs);
     if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
     const positions = greatCirclePoints(pos.lat, pos.lon, v.latDestino, v.lonDestino, 64);
 
-    // Calcular rumbo usando el segundo punto de la curva si existe para mayor precisión
     let heading = calcularRumboActual(
       pos.lat,
       pos.lon,
@@ -869,133 +929,132 @@ export default function MapaSimDiaria() {
       positions[1] ? positions[1][1] : v.lonDestino
     );
     heading = aplicarOffsetRotacion(heading);
-    return { idTramo: v.idTramo, positions, heading, capacidadMax: v.raw?.capacidadMaxima || 300, capacidadOcupada: v.raw?.capacidadOcupada || 0 };
+    return {
+      idTramo: v.idTramo,
+      positions,
+      heading,
+      capacidadMax: v.raw?.capacidadMaxima || 300,
+      capacidadOcupada: v.raw?.capacidadOcupada || 0,
+    };
   }, [vueloSeleccionado, vuelosFiltrados, vuelos, nowMs, calcularPosicion]);
 
-  // Callback para seleccionar vuelo desde el panel
-  const handleSelectVueloPanel = useCallback((vueloData) => {
-    console.log('📍 Vuelo seleccionado - datos recibidos:', vueloData);
+  const handleSelectVueloPanel = useCallback(
+    (vueloData) => {
+      console.log("📍 Vuelo seleccionado - datos recibidos:", vueloData);
 
-    // Cerrar panel de aeropuerto y deseleccionar aeropuerto
-    setAeropuertoDetalle(null);
-    setAeropuertoSeleccionado(null);
+      setAeropuertoDetalle(null);
+      setAeropuertoSeleccionado(null);
 
-    // Buscar en vuelosFiltrados primero (que ya tienen pos calculada)
-    let vueloCompleto = vuelosFiltrados.find(v =>
-      v.idTramo === vueloData.id ||
-      v.idTramo === vueloData.idTramo ||
-      v.raw.id === vueloData.id
-    );
-
-    // Si no se encuentra en filtrados, buscar en vuelos completos
-    if (!vueloCompleto) {
-      const vueloBase = vuelos.find(v =>
-        v.idTramo === vueloData.id ||
-        v.idTramo === vueloData.idTramo ||
-        v.raw.id === vueloData.id
+      let vueloCompleto = vuelosFiltrados.find(
+        (v) =>
+          v.idTramo === vueloData.id ||
+          v.idTramo === vueloData.idTramo ||
+          v.raw.id === vueloData.id
       );
 
-      if (vueloBase) {
-        const pos = calcularPosicion(vueloBase, nowMs);
-        const heading = calcularRumboActual(pos.lat, pos.lon, vueloBase.latDestino, vueloBase.lonDestino);
-        vueloCompleto = { ...vueloBase, pos, heading, rotation: aplicarOffsetRotacion(heading) };
+      if (!vueloCompleto) {
+        const vueloBase = vuelos.find(
+          (v) =>
+            v.idTramo === vueloData.id ||
+            v.idTramo === vueloData.idTramo ||
+            v.raw.id === vueloData.id
+        );
+
+        if (vueloBase) {
+          const pos = calcularPosicion(vueloBase, nowMs);
+          const heading = calcularRumboActual(pos.lat, pos.lon, vueloBase.latDestino, vueloBase.lonDestino);
+          vueloCompleto = { ...vueloBase, pos, heading, rotation: aplicarOffsetRotacion(heading) };
+        }
       }
-    }
 
-    if (!vueloCompleto) {
-      console.warn('⚠️ No se encontró el vuelo en la lista', vueloData);
-      return;
-    }
+      if (!vueloCompleto) {
+        console.warn("⚠️ No se encontró el vuelo en la lista", vueloData);
+        return;
+      }
 
-    console.log('✅ Vuelo encontrado:', vueloCompleto);
+      const { pos } = vueloCompleto;
+      if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) {
+        console.warn("⚠️ Posición inválida del vuelo");
+        return;
+      }
 
-    const { pos } = vueloCompleto;
+      const detalleParaPanel = {
+        ...vueloCompleto,
+        pos: { ...pos },
+        timestamp: Date.now(),
+      };
 
-    if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) {
-      console.warn('⚠️ Posición inválida del vuelo');
-      return;
-    }
+      setVueloDetalleCompleto(detalleParaPanel);
+      setVueloSeleccionado(vueloCompleto.idTramo);
 
-    // ⭐ IMPORTANTE: Actualizar estados ANTES de verificar mapRef
-    const detalleParaPanel = {
-      ...vueloCompleto,
-      pos: { ...pos },
-      timestamp: Date.now()
-    };
+      if (Number.isFinite(pos.lat) && Number.isFinite(pos.lon)) {
+        setFlyTarget({ lat: pos.lat, lon: pos.lon, zoom: 6, t: Date.now() });
+        setTimeout(() => setFlyTarget(null), 100);
+      }
+    },
+    [vuelos, vuelosFiltrados, nowMs, calcularPosicion]
+  );
 
-    console.log('🔧 Estableciendo vueloDetalleCompleto:', detalleParaPanel);
-    setVueloDetalleCompleto(detalleParaPanel);
-    setVueloSeleccionado(vueloCompleto.idTramo);
-
-    // Acercar el mapa al vuelo usando flyTarget (consistente con aeropuertos)
-    if (Number.isFinite(pos.lat) && Number.isFinite(pos.lon)) {
-      console.log('✅ Configurando zoom a vuelo:', [pos.lat, pos.lon]);
-      setFlyTarget({ lat: pos.lat, lon: pos.lon, zoom: 6, t: Date.now() });
-      // Limpiar flyTarget después del zoom para evitar re-renders
-      setTimeout(() => setFlyTarget(null), 100);
-    }
-  }, [vuelos, vuelosFiltrados, nowMs, calcularPosicion]);
-
-  // Callback para cerrar el panel de detalle
   const handleCerrarDetalle = useCallback(() => {
-    console.log('🔒 Cerrando panel de detalle');
     setVueloDetalleCompleto(null);
     setVueloSeleccionado(null);
   }, []);
 
-  // Callback para seleccionar aeropuerto
   const handleSelectAeropuerto = useCallback((a, shouldZoom = false) => {
-    console.log('🏢 Aeropuerto seleccionado:', a);
-    setVueloDetalleCompleto(null); // cerrar panel vuelo si estaba abierto
-    setVueloSeleccionado(null); // deseleccionar vuelo
+    console.log("🏢 Aeropuerto seleccionado:", a);
+    setVueloDetalleCompleto(null);
+    setVueloSeleccionado(null);
     setAeropuertoDetalle(a);
     setAeropuertoSeleccionado(a?.id ?? null);
 
-    // Acercar el mapa al aeropuerto solo si se indica (cuando viene del catálogo)
     const lat = Number(a.lat);
     const lon = Number(a.lon);
     if (shouldZoom && Number.isFinite(lat) && Number.isFinite(lon)) {
       setFlyTarget({ lat, lon, zoom: 6, t: Date.now() });
-      // Limpiar flyTarget después del zoom para evitar re-renders
       setTimeout(() => setFlyTarget(null), 100);
     } else if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      console.warn('⚠️ Coordenadas inválidas para aeropuerto seleccionado:', a);
+      console.warn("⚠️ Coordenadas inválidas para aeropuerto seleccionado:", a);
     }
   }, []);
   const handleCerrarAeropuerto = useCallback(() => setAeropuertoDetalle(null), []);
 
-
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
-      <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 1400,
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+          pointerEvents: "auto",
+        }}
+      >
         <HoraActual style={{ position: "relative" }} />
-        <SimulationControlsDia />
+        {/* 👉 Pasamos aeropuertos a la barra de control vía props */}
+        <SimulationControlsDia airports={airports} />
       </div>
 
-      {/* ✅ Botón de filtro: Solo vuelos con envíos */}
       <button
         onClick={() => setSoloConEnvios(!soloConEnvios)}
         className="btn-envios"
         style={{
-          background: soloConEnvios ?
-            "linear-gradient(135deg, #10b981 0%, #059669 100%)" :
-            "linear-gradient(135deg, #64748b 0%, #475569 100%)",
-          boxShadow: soloConEnvios ?
-            "0 4px 12px rgba(16, 185, 129, 0.4)" :
-            "0 4px 12px rgba(0,0,0,0.15)",
+          background: soloConEnvios
+            ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+            : "linear-gradient(135deg, #64748b 0%, #475569 100%)",
+          boxShadow: soloConEnvios
+            ? "0 4px 12px rgba(16, 185, 129, 0.4)"
+            : "0 4px 12px rgba(0,0,0,0.15)",
         }}
-        title={soloConEnvios ?
-          "Mostrando solo vuelos con envíos" :
-          "Mostrando todos los vuelos"}
+        title={soloConEnvios ? "Mostrando solo vuelos con envíos" : "Mostrando todos los vuelos"}
       >
         <span style={{ fontSize: 16 }}>📦</span>
-        <span>{soloConEnvios ?
-          "Solo con Envíos" :
-          "Todos los Vuelos"}
-        </span>
+        <span>{soloConEnvios ? "Solo con Envíos" : "Todos los Vuelos"}</span>
       </button>
 
-      {/* ⭐ Botón de Catálogos en el centro izquierdo - solo visible cuando el panel está cerrado */}
       {!panelAbierto && (
         <button
           onClick={() => setPanelAbierto(true)}
@@ -1022,7 +1081,7 @@ export default function MapaSimDiaria() {
             transition: "all 0.3s ease",
             writingMode: "vertical-rl",
             textOrientation: "mixed",
-            letterSpacing: "0.5px"
+            letterSpacing: "0.5px",
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.paddingLeft = "18px";
@@ -1042,7 +1101,6 @@ export default function MapaSimDiaria() {
         </button>
       )}
 
-      {/* Panel lateral de catálogos con callback */}
       <PanelCatalogos
         isOpen={panelAbierto}
         onClose={() => setPanelAbierto(false)}
@@ -1055,21 +1113,16 @@ export default function MapaSimDiaria() {
         vuelosConEnvios={vuelosConEnvios}
       />
 
-      {/* ⭐ Panel de detalle del vuelo seleccionado */}
-      {(vueloDetalleCompleto || aeropuertoDetalle) && (
-        vueloDetalleCompleto ? (
-          <PanelVueloDetalle
-            vuelo={vueloDetalleCompleto}
-            onClose={handleCerrarDetalle}
-          />
+      {(vueloDetalleCompleto || aeropuertoDetalle) &&
+        (vueloDetalleCompleto ? (
+          <PanelVueloDetalle vuelo={vueloDetalleCompleto} onClose={handleCerrarDetalle} />
         ) : (
           <PanelAeropuertoDetalle
             aeropuerto={aeropuertoDetalle}
             vuelosEnTransito={vuelosFiltrados}
             onClose={handleCerrarAeropuerto}
           />
-        )
-      )}
+        ))}
 
       <MapContainer
         center={center}
@@ -1081,33 +1134,35 @@ export default function MapaSimDiaria() {
         markerZoomAnimation={true}
         style={{ width: "100%", height: "100%" }}
         worldCopyJump={true}
-        maxBounds={[[-85, -Infinity], [85, Infinity]]}
+        maxBounds={[
+          [-85, -Infinity],
+          [85, Infinity],
+        ]}
         maxBoundsViscosity={1.0}
         preferCanvas={true}
         renderer={canvasRenderer}
         whenCreated={(map) => {
-          console.log('🗺️ Mapa creado con Canvas renderer para optimización');
+          console.log("🗺️ Mapa creado con Canvas renderer para optimización");
           mapRef.current = map;
           setTimeout(() => map.invalidateSize(), 50);
           try {
-            map.on('movestart', () => setNavegando(true));
-            map.on('zoomstart', () => setNavegando(true));
-            map.on('moveend', () => setNavegando(false));
-            map.on('zoomend', () => setNavegando(false));
+            map.on("movestart", () => setNavegando(true));
+            map.on("zoomstart", () => setNavegando(true));
+            map.on("moveend", () => setNavegando(false));
+            map.on("zoomend", () => setNavegando(false));
           } catch { }
         }}
       >
-        {/* Controlador de vuelo suave al target seleccionado */}
         <SmoothFlyTo target={flyTarget} />
         <TileLayer
-          attribution='&copy; OpenStreetMap contributors'
+          attribution="&copy; OpenStreetMap contributors"
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           noWrap={false}
           updateWhenIdle={true}
           keepBuffer={2}
         />
 
-        {airports.map(a => {
+        {airports.map((a) => {
           const isSelected = aeropuertoSeleccionado === a.id;
           return (
             <Fragment key={`ap-frag-${a.id}`}>
@@ -1118,21 +1173,19 @@ export default function MapaSimDiaria() {
                 zIndexOffset={isSelected ? 800 : 0}
                 eventHandlers={{ click: () => handleSelectAeropuerto(a, false) }}
               >
-                <Tooltip
-                  direction="top"
-                  offset={[0, -10]}
-                  opacity={0.95}
-                  permanent={false}
-                >
-                  <div style={{
-                    background: '#fff',
-                    color: '#0f172a',
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    fontWeight: 600
-                  }}>
-                    {a.ciudad}{a.codigo ? ` (${a.codigo})` : ""}
+                <Tooltip direction="top" offset={[0, -10]} opacity={0.95} permanent={false}>
+                  <div
+                    style={{
+                      background: "#fff",
+                      color: "#0f172a",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {a.ciudad}
+                    {a.codigo ? ` (${a.codigo})` : ""}
                     {a.porcentaje != null && (
                       <div style={{ fontSize: 10, marginTop: 2 }}>
                         {a.capacidadOcupada}/{a.capacidadMaxima} ({a.porcentaje}%)
@@ -1146,33 +1199,41 @@ export default function MapaSimDiaria() {
                   key={`ap-hl-${a.id}`}
                   center={[a.lat, a.lon]}
                   radius={14}
-                  pathOptions={{ color: '#2563eb', weight: 3, fill: false, dashArray: '6,4' }}
+                  pathOptions={{ color: "#2563eb", weight: 3, fill: false, dashArray: "6,4" }}
                 />
               )}
             </Fragment>
           );
         })}
 
-        {/* Renderiza solo los vuelos filtrados */}
-        {vuelosFiltrados.map(v => {
+        {vuelosFiltradosUnicos.map((v) => {
           const { pos } = v;
           if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
           const isSelected = vueloSeleccionado === v.idTramo;
 
-          // Capacidad y color por capacidad
           const capacidadMax = v.raw?.capacidadMaxima || 300;
-          // Calcular capacidad ocupada usando historial si no hay envíos actuales
-          let capacidadOcupada = Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0
-            ? v.raw.enviosAsignados.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
-            : (Array.isArray(v.raw?.__historialEnviosCompletos) && v.raw.__historialEnviosCompletos.length > 0
-              ? v.raw.__historialEnviosCompletos.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
-              : 0);
+          let capacidadOcupada =
+            Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0
+              ? v.raw.enviosAsignados.reduce(
+                (sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0),
+                0
+              )
+              : Array.isArray(v.raw?.__historialEnviosCompletos) &&
+                v.raw.__historialEnviosCompletos.length > 0
+                ? v.raw.__historialEnviosCompletos.reduce(
+                  (sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0),
+                  0
+                )
+                : 0;
           const capacidadPct = capacidadMax > 0 ? Math.round((capacidadOcupada / capacidadMax) * 100) : 0;
           const color = isSelected
             ? "#2563eb"
-            : capacidadPct < 50 ? "#10b981" : capacidadPct < 80 ? "#f59e0b" : "#dc2626";
+            : capacidadPct <= 60
+              ? "#10b981"
+              : capacidadPct <= 85
+                ? "#f59e0b"
+                : "#dc2626";
 
-          // Usar rotación calculada (rumbo actual - 90°)
           const icono = getPlaneIcon(color, v.rotation ?? 0);
 
           return (
@@ -1187,45 +1248,47 @@ export default function MapaSimDiaria() {
                   handleSelectVuelo({
                     id: v.idTramo,
                     idTramo: v.idTramo,
-                    ...v.raw
+                    ...v.raw,
                   });
-                }
+                },
               }}
             >
-              {/* Debug: línea corta indicando heading aplicado */}
               {DEBUG_HEADING && (
                 <Polyline
                   positions={[
                     [v.pos.lat, v.pos.lon],
                     [
-                      v.pos.lat + 0.6 * Math.cos((v.heading) * Math.PI / 180),
-                      v.pos.lon + 0.6 * Math.sin((v.heading) * Math.PI / 180)
-                    ]
+                      v.pos.lat + 0.6 * Math.cos((v.heading * Math.PI) / 180),
+                      v.pos.lon + 0.6 * Math.sin((v.heading * Math.PI) / 180),
+                    ],
                   ]}
-                  pathOptions={{ color: 'black', weight: 2 }}
+                  pathOptions={{ color: "black", weight: 2 }}
                 />
               )}
-              <Tooltip
-                direction="top"
-                offset={[0, -8]}
-                opacity={0.9}
-                permanent={false}
-              >
-                <div style={{
-                  background: '#fff',
-                  color: '#0f172a',
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  fontSize: 11,
-                  minWidth: 140
-                }}>
-                  <div style={{ fontWeight: 700, marginBottom: 3, color: isSelected ? '#2563eb' : '#1976d2' }}>
+              <Tooltip direction="top" offset={[0, -8]} opacity={0.9} permanent={false}>
+                <div
+                  style={{
+                    background: "#fff",
+                    color: "#0f172a",
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    fontSize: 11,
+                    minWidth: 140,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      marginBottom: 3,
+                      color: isSelected ? "#2563eb" : "#1976d2",
+                    }}
+                  >
                     ✈️ #{v.idTramo}
                   </div>
                   <div style={{ fontSize: 10, marginBottom: 2 }}>
                     {v.ciudadOrigenName || "?"} → {v.ciudadDestinoName || "?"}
                   </div>
-                  <div style={{ fontSize: 10, color: '#64748b' }}>
+                  <div style={{ fontSize: 10, color: "#64748b" }}>
                     {(pos.progreso * 100).toFixed(0)}% • {capacidadOcupada}/{capacidadMax}
                   </div>
                 </div>
@@ -1234,7 +1297,6 @@ export default function MapaSimDiaria() {
           );
         })}
 
-        {/* ⭐ Ruta restante solo del vuelo seleccionado */}
         {selectedRuta && (
           <Polyline
             key={`ruta-seleccionada-${selectedRuta.idTramo}`}
@@ -1247,7 +1309,6 @@ export default function MapaSimDiaria() {
             lineCap="round"
           />
         )}
-
       </MapContainer>
     </div>
   );

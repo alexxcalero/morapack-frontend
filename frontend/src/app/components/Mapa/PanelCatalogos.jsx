@@ -1081,7 +1081,7 @@ export default function PanelCatalogos({
                 background: 'white',
                 borderRadius: 12,
                 boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-                zIndex: 1300,
+                zIndex: 2000,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
