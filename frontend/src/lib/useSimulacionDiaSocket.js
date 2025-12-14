@@ -9,14 +9,14 @@ export function useSimulacionDiaSocket(onPayload) {
   useEffect(() => {
     const wsUrl =
       process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
-      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
+      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion-sockjs";
 
     const socket = new SockJS(wsUrl);
 
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
-      debug: () => {}, // o console.log si quieres
+      debug: () => { }, // o console.log si quieres
     });
 
     client.onConnect = () => {
