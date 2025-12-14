@@ -9,7 +9,7 @@ export function useSimulacionDiaSocket(onPayload) {
   useEffect(() => {
     const wsUrl =
       process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
-      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion-sockjs";
+      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
 
     const socket = new SockJS(wsUrl);
 
