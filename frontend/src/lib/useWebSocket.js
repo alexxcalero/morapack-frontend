@@ -39,11 +39,11 @@ export default function useWebSocket({ topic, onMessage, enabled = true }) {
         try {
             const apiUrl = new URL(API_BASE);
             const wsScheme = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-            brokerURL = `${wsScheme}//${apiUrl.host}/ws-planificacion-sockjs`;
+            brokerURL = `${wsScheme}//${apiUrl.host}/ws-planificacion`;
         } catch (_) {
             brokerURL = API_BASE.startsWith('https')
-                ? API_BASE.replace(/^https?:\/\//, 'wss://') + '/ws-planificacion-sockjs'
-                : API_BASE.replace(/^http?:\/\//, 'ws://') + '/ws-planificacion-sockjs';
+                ? API_BASE.replace(/^https?:\/\//, 'wss://') + '/ws-planificacion'
+                : API_BASE.replace(/^http?:\/\//, 'ws://') + '/ws-planificacion';
         }
 
         console.log('[WS] Intentando conexión nativa →', brokerURL);

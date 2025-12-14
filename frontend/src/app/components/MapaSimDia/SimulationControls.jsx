@@ -354,7 +354,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
     useEffect(() => {
         const wsUrl =
             process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
-            "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion-sockjs";
+            "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
 
         const socket = new SockJS(wsUrl);
         const client = new Client({
