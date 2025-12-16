@@ -2025,7 +2025,7 @@ export default function Mapa() {
   style={{
     position: "absolute",
     top: 3, // más arriba
-    left: controlesAbiertos ? "50%" : 8,
+    left: controlesAbiertos ? "50%" : 45,
     transform: controlesAbiertos ? "translateX(-50%)" : "none",
     zIndex: 1400,
     display: "flex",
