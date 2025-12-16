@@ -5,7 +5,7 @@ import React, { useEffect, useState, useMemo } from "react";
 // URL base del backend (configurable por env NEXT_PUBLIC_BACKEND_URL)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
-export default function SimulationControls({ startStr = null }) {
+export default function SimulationControls({ startStr = null, onFechaInicioChange }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
     const [iniciando, setIniciando] = useState(false); // ← estado separado para iniciar sin bloquear UI
     const [inicializando, setInicializando] = useState(false); // ← estado para el botón inicializar
@@ -174,7 +174,23 @@ export default function SimulationControls({ startStr = null }) {
         setEstado({ activo: false, cargando: true });
 
         try {
-            // Llamar al backend para detener
+            // 1. Obtener el resumen ANTES de detener el planificador
+            let resumenData = null;
+            try {
+                const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+                if (resumenRes.ok) {
+                    resumenData = await resumenRes.json();
+                }
+            } catch (e) {
+                console.error('Error obteniendo resumen antes de detener:', e);
+            }
+
+            // 2. Emitir evento con el resumen para que el mapa lo muestre
+            try {
+                window.dispatchEvent(new CustomEvent('planificador:detenido', { detail: { resumen: resumenData } }));
+            } catch { }
+
+            // 3. Llamar al backend para detener
             await fetch(`${API_BASE}/api/planificador/detener`, { method: "POST" });
 
             // Esperar un poco para que el backend termine de cancelar eventos
@@ -196,9 +212,6 @@ export default function SimulationControls({ startStr = null }) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 intentos++;
             }
-
-            // Ahora sí emitir evento de detención (después de confirmar)
-            try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
 
         } catch (error) {
             console.error('Error al detener:', error);
@@ -251,7 +264,12 @@ export default function SimulationControls({ startStr = null }) {
                 <input
                     type="datetime-local"
                     value={fechaInicio}
-                    onChange={(e) => setFechaInicio(e.target.value)}
+                    onChange={(e) => {
+                        setFechaInicio(e.target.value);
+                        if (typeof onFechaInicioChange === 'function') {
+                            onFechaInicioChange(e.target.value);
+                        }
+                    }}
                     style={inputStyle}
                     title="Fecha de inicio de la simulación"
                 />

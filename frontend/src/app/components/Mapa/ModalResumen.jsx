@@ -3,8 +3,43 @@
 import React from 'react';
 import { X, CheckCircle2, Truck, Clock, Package, TrendingUp } from 'lucide-react';
 
-export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = false }) {
+function fmtElapsed(ms) {
+    if (ms == null || ms < 0) return "0min";
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    // Formato: 1h 20min, 2h, 5min, etc.
+    if (h > 0 && m > 0) return `${h}h ${m}min`;
+    if (h > 0) return `${h}h`;
+    return `${m}min`;
+}
+
+export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = false, realElapsed, simNow, fechaInicio }) {
     if (!isOpen) return null;
+
+    // Formatear fechas
+    function formatearFecha(fechaIso) {
+        if (!fechaIso) return 'N/A';
+        const d = new Date(fechaIso);
+        if (isNaN(d.getTime())) return 'N/A';
+        const dia = String(d.getDate()).padStart(2, '0');
+        const mes = String(d.getMonth() + 1).padStart(2, '0');
+        const anio = d.getFullYear();
+        const hora = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${dia}-${mes}-${anio} ${hora}:${min}`;
+    }
+
+    // Formatear fecha/hora simulada (Date)
+    function formatearFechaSimulada(dateObj) {
+        if (!dateObj || isNaN(dateObj.getTime?.())) return 'N/A';
+        const dia = String(dateObj.getDate()).padStart(2, '0');
+        const mes = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const anio = dateObj.getFullYear();
+        const hora = String(dateObj.getHours()).padStart(2, '0');
+        const min = String(dateObj.getMinutes()).padStart(2, '0');
+        return `${dia}-${mes}-${anio} ${hora}:${min}`;
+    }
 
     return (
         <div
@@ -27,7 +62,7 @@ export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = fa
                 style={{
                     backgroundColor: 'white',
                     borderRadius: '16px',
-                    maxWidth: '600px',
+                    maxWidth: '420px',
                     width: '100%',
                     maxHeight: '90vh',
                     overflow: 'auto',
@@ -71,170 +106,37 @@ export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = fa
                         <X size={20} />
                     </button>
 
-                    <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>
+                    <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 700, marginBottom: '8px' }}>
                         🎯 Resumen de Simulación
                     </h2>
-                    <p style={{ margin: 0, fontSize: '14px', opacity: 0.9 }}>
-                        {esDetenida ? 'Simulación detenida manualmente' : 'Simulación completada exitosamente'}
-                    </p>
                 </div>
 
                 {/* Content */}
-                <div style={{ padding: '24px' }}>
-                    {/* Estadísticas principales */}
-                    <div
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(2, 1fr)',
-                            gap: '16px',
-                            marginBottom: '24px',
-                        }}
-                    >
-                        {/* Total de envíos */}
-                        <div
-                            style={{
-                                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                                padding: '20px',
-                                borderRadius: '12px',
-                                border: '2px solid #bae6fd',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                <Package size={24} color="#0284c7" />
-                                <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>
-                                    Total de envíos
-                                </span>
-                            </div>
-                            <div style={{ fontSize: '32px', fontWeight: 700, color: '#0284c7' }}>
-                                {resumen?.totalEnvios || 0}
-                            </div>
-                        </div>
-
-                        {/* Envíos entregados */}
-                        <div
-                            style={{
-                                background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-                                padding: '20px',
-                                borderRadius: '12px',
-                                border: '2px solid #bbf7d0',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                <CheckCircle2 size={24} color="#16a34a" />
-                                <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>
-                                    Entregados
-                                </span>
-                            </div>
-                            <div style={{ fontSize: '32px', fontWeight: 700, color: '#16a34a' }}>
-                                {resumen?.enviosEntregados || 0}
-                            </div>
-                        </div>
-
-                        {/* En tránsito */}
-                        <div
-                            style={{
-                                background: 'linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)',
-                                padding: '20px',
-                                borderRadius: '12px',
-                                border: '2px solid #fde047',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                <Truck size={24} color="#ca8a04" />
-                                <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>
-                                    En tránsito
-                                </span>
-                            </div>
-                            <div style={{ fontSize: '32px', fontWeight: 700, color: '#ca8a04' }}>
-                                {resumen?.enviosEnTransito || 0}
-                            </div>
-                        </div>
-
-                        {/* Pendientes */}
-                        <div
-                            style={{
-                                background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
-                                padding: '20px',
-                                borderRadius: '12px',
-                                border: '2px solid #fecaca',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                <Clock size={24} color="#dc2626" />
-                                <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>
-                                    Pendientes
-                                </span>
-                            </div>
-                            <div style={{ fontSize: '32px', fontWeight: 700, color: '#dc2626' }}>
-                                {resumen?.enviosPendientes || 0}
-                            </div>
-                        </div>
+                <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                    <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
+                        Fecha de Inicio: <span style={{ fontWeight: 400 }}>{formatearFecha(fechaInicio)}</span>
                     </div>
-
-                    {/* Progreso */}
-                    <div
-                        style={{
-                            background: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
-                            padding: '20px',
-                            borderRadius: '12px',
-                            border: '2px solid #e9d5ff',
-                            marginBottom: '24px',
-                        }}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                            <TrendingUp size={24} color="#9333ea" />
-                            <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 600 }}>
-                                Porcentaje completado
-                            </span>
-                        </div>
-
-                        {/* Barra de progreso */}
-                        <div
-                            style={{
-                                width: '100%',
-                                height: '32px',
-                                backgroundColor: '#f3e8ff',
-                                borderRadius: '8px',
-                                overflow: 'hidden',
-                                marginBottom: '8px',
-                                position: 'relative',
-                            }}
-                        >
-                            <div
-                                style={{
-                                    width: `${resumen?.porcentajeCompletado || 0}%`,
-                                    height: '100%',
-                                    background: 'linear-gradient(90deg, #9333ea 0%, #c084fc 100%)',
-                                    transition: 'width 0.5s ease',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'flex-end',
-                                    paddingRight: '12px',
-                                }}
-                            >
-                                <span style={{ color: 'white', fontWeight: 700, fontSize: '14px' }}>
-                                    {(resumen?.porcentajeCompletado || 0).toFixed(1)}%
-                                </span>
-                            </div>
-                        </div>
+                    <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
+                        Fecha de Fin: <span style={{ fontWeight: 400 }}>{formatearFechaSimulada(simNow)}</span>
                     </div>
-
-                    {/* Duración */}
-                    <div
-                        style={{
-                            background: '#f8fafc',
-                            padding: '16px',
-                            borderRadius: '12px',
-                            border: '1px solid #e2e8f0',
-                            textAlign: 'center',
-                        }}
-                    >
-                        <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px' }}>
-                            Duración de la simulación
-                        </div>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b' }}>
-                            ⏱️ {resumen?.duracionSimulacion || 'N/A'}
-                        </div>
+                    <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
+                        Duración de la simulación en tiempo real: <span style={{ fontWeight: 400 }}>{fmtElapsed(realElapsed)}</span>
+                    </div>
+                    <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
+                        Cantidad de ciclos realizados: <span style={{ fontWeight: 400 }}>
+                            {(() => {
+                                if (typeof resumen?.totalCiclosCompletados === 'number' && resumen.totalCiclosCompletados > 0) {
+                                    return resumen.totalCiclosCompletados + ' ciclos';
+                                } else if (typeof resumen?.cicloActual === 'number' && resumen.cicloActual > 0) {
+                                    return resumen.cicloActual + ' ciclos';
+                                } else {
+                                    return 'N/A';
+                                }
+                            })()}
+                        </span>
+                    </div>
+                    <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
+                        Cantidad de Pedidos Procesados: <span style={{ fontWeight: 400 }}>{resumen?.pedidosCompletados ?? resumen?.totalPedidos ?? 'N/A'} pedidos</span>
                     </div>
                 </div>
 
@@ -245,8 +147,53 @@ export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = fa
                         borderTop: '1px solid #e2e8f0',
                         display: 'flex',
                         justifyContent: 'flex-end',
+                        gap: '12px',
                     }}
                 >
+                    <button
+                        onClick={() => {
+                            // Descargar el reporte desde el backend remoto
+                            fetch('https://1inf54-981-5e.inf.pucp.edu.pe/api/planificador/descargar-reporte')
+                                .then(async (res) => {
+                                    if (!res.ok) throw new Error('No se pudo descargar el reporte');
+                                    const blob = await res.blob();
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    // Intenta obtener el nombre del archivo del header
+                                    const disposition = res.headers.get('content-disposition');
+                                    let filename = 'reporte-ultima-planificacion.txt';
+                                    if (disposition && disposition.indexOf('filename=') !== -1) {
+                                        filename = disposition.split('filename=')[1].replace(/"/g, '').trim();
+                                    }
+                                    a.download = filename;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    setTimeout(() => {
+                                        window.URL.revokeObjectURL(url);
+                                        document.body.removeChild(a);
+                                    }, 100);
+                                })
+                                .catch(() => {
+                                    alert('No se pudo descargar el reporte.');
+                                });
+                        }}
+                        style={{
+                            background: '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            padding: '10px 18px',
+                            borderRadius: '8px',
+                            fontWeight: 600,
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            transition: 'background 0.2s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#059669'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#10b981'}
+                    >
+                        Descargar última planificación
+                    </button>
                     <button
                         onClick={onClose}
                         style={{
