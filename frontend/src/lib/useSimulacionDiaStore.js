@@ -1,4 +1,4 @@
-// src/app/lib/useSimulacionDiaStore.js
+/* // src/app/lib/useSimulacionDiaStore.js
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -17,16 +17,15 @@ export function useSimulacionDiaStore() {
   const clientRef = useRef(null);
 
   useEffect(() => {
-    // Usar el endpoint con SockJS habilitado
     const wsUrl =
-      process.env.NEXT_PUBLIC_BACKEND_WS_SOCKJS_URL ||
-      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion-sockjs";
+      process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
+      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
 
     const socket = new SockJS(wsUrl);
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
-      debug: () => { },
+      debug: () => {},
     });
 
     client.onConnect = () => {
@@ -65,3 +64,4 @@ export function useSimulacionDiaStore() {
 
   return simState;
 }
+ */

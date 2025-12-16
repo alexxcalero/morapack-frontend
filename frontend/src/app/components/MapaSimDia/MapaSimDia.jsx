@@ -12,7 +12,6 @@ import SimulationControlsDia from "./SimulationControls";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
-import { useSimulacionDiaSocket } from "@/lib/useSimulacionDiaSocket";
 
 // URL base del backend (misma usada en SimulationControls)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
@@ -249,19 +248,6 @@ function getPlaneIcon(color, rotation = 0) {
   return icon;
 }
 
-function calcularAngulo(latOrigen, lonOrigen, latDestino, lonDestino) {
-  const dLon = lonDestino - lonOrigen;
-  const y = Math.sin((dLon * Math.PI) / 180) * Math.cos((latDestino * Math.PI) / 180);
-  const x =
-    Math.cos((latOrigen * Math.PI) / 180) * Math.sin((latDestino * Math.PI) / 180) -
-    Math.sin((latOrigen * Math.PI) / 180) *
-    Math.cos((latDestino * Math.PI) / 180) *
-    Math.cos((dLon * Math.PI) / 180);
-  let angulo = (Math.atan2(y, x) * 180) / Math.PI;
-  angulo = (angulo + 320) % 360;
-  return angulo;
-}
-
 function toRad(deg) {
   return (deg * Math.PI) / 180;
 }
@@ -345,37 +331,71 @@ export default function MapaSimDiaria() {
   const [vueloDetalleCompleto, setVueloDetalleCompleto] = useState(null);
   const [aeropuertoDetalle, setAeropuertoDetalle] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
+  const [controlesAbiertos, setControlesAbiertos] = useState(true);
+
 
 
   useEffect(() => {
     const autostart = async () => {
       try {
-        const resp = await fetch(`${API_BASE}/api/planificador/autostart-simulacion-dia`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
+        // Timeout de seguridad (evita requests colgadas)
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 12_000);
+
+        const resp = await fetch(
+          `${API_BASE}/api/planificador/autostart-simulacion-dia`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+          }
+        );
+
+        clearTimeout(t);
 
         if (!resp.ok) {
           const txt = await resp.text().catch(() => null);
-          console.error(
-            "[autostart] HTTP " + resp.status + (txt ? " - " + txt : "")
-          );
+          console.error("[autostart] HTTP " + resp.status + (txt ? " - " + txt : ""));
           return;
         }
 
         const data = await resp.json().catch(() => ({}));
         console.log("[autostart] respuesta:", data);
-        // Aquí podrías, si quieres, sincronizar algo con el front
-        // (por ejemplo, si te devuelve simMs)
+
+        const vuelosInit = Array.isArray(data?.vuelos) ? data.vuelos : [];
+
+        if (vuelosInit.length > 0) {
+          // 1) Sembrar el cache para que el mapa dibuje ya (merge por id)
+          setVuelosCache((prev) => {
+            const prevArr = Array.isArray(prev) ? prev : [];
+            const m = new Map(prevArr.map((v) => [v?.id, v]).filter(([id]) => id != null));
+            for (const v of vuelosInit) {
+              if (v?.id == null) continue;
+              m.set(v.id, { ...(m.get(v.id) || {}), ...v });
+            }
+            return Array.from(m.values());
+          });
+
+          // 2) (Opcional) setRawVuelos si lo usas en algún lado
+          setRawVuelos(vuelosInit);
+        }
+
+        // 3) Forzar refresco inmediato del polling (si lo estás escuchando)
+        try {
+          window.dispatchEvent(new Event("planificador:iniciado"));
+        } catch { }
       } catch (err) {
-        console.error("[autostart] error llamando al backend:", err);
+        if (err?.name === "AbortError") {
+          console.error("[autostart] timeout (AbortError)");
+        } else {
+          console.error("[autostart] error llamando al backend:", err);
+        }
       }
     };
 
     autostart();
   }, []);
+
 
   // Tiempo simulado
   const [nowMs, setNowMs] = useState(() => getSimMs());
@@ -384,33 +404,12 @@ export default function MapaSimDiaria() {
     return () => unsub();
   }, []);
 
-  // 🔔 STOMP: recibir actualizaciones en tiempo real
-  // Soporta:
-  //  - payload = array (solo vuelos)
-  //  - payload = { vuelos, aeropuertos } (vuelos + aeropuertos dinámicos)
-  useSimulacionDiaSocket((payload) => {
-    if (Array.isArray(payload)) {
-      // Compatibilidad retro: solo lista de vuelos
-      setVuelosCache(payload);
-      return;
-    }
-    if (payload && typeof payload === "object") {
-      if (Array.isArray(payload.vuelos)) {
-        setVuelosCache(payload.vuelos);
-      }
-      if (Array.isArray(payload.aeropuertos)) {
-        // Actualizar capacidades dinámicas de aeropuertos desde STOMP
-        setDynamicAirports(payload.aeropuertos);
-      }
-    }
-  });
-
   // 🌍 REST: catálogo base de aeropuertos (coordenadas, país, etc.)
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`, { cache: "no-store" });
+        const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerTodos`);
         if (!res.ok) throw new Error("fetch aeropuertos " + res.status);
         const data = await res.json();
         if (!mounted) return;
@@ -448,7 +447,7 @@ export default function MapaSimDiaria() {
 
     async function loadUltimoCiclo() {
       try {
-        const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`, { cache: "no-store" });
+        const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
         if (!mounted || cancelled) return;
         if (!res.ok) {
           console.warn("vuelos-ultimo-ciclo HTTP", res.status);
@@ -591,7 +590,7 @@ export default function MapaSimDiaria() {
         const dynamic = dynamicMap[a.id] || {};
         const ilimitado = esAeropuertoPrincipal(a);
         const capacidadMaxima = ilimitado ? null : dynamic.capacidadMaxima ?? a.capacidadMaxima ?? a.capacidad ?? null;
-        const capacidadOcupada = ilimitado ? 0 : (dynamic.capacidadOcupada ?? 0);
+        const capacidadOcupada = ilimitado ? 0 : dynamic.capacidadOcupada ?? a.capacidadOcupada ?? 0;
 
         return {
           id: a.id,
@@ -1018,48 +1017,78 @@ export default function MapaSimDiaria() {
   }, []);
   const handleCerrarAeropuerto = useCallback(() => setAeropuertoDetalle(null), []);
 
-  useEffect(() => {
-    const onClean = () => {
-      // 🔥 borrar todo lo que deja “muestra” visual
-      setDynamicAirports([]);      // capacidades dinámicas
-      setVuelosCache([]);          // vuelos en memoria
-      setRawVuelos([]);            // opcional
-      setHorizonte(null);          // opcional
-
-      // cerrar paneles/selecciones
-      setVueloDetalleCompleto(null);
-      setAeropuertoDetalle(null);
-      setVueloSeleccionado(null);
-      setAeropuertoSeleccionado(null);
-
-      // opcional: volver a modo normal
-      setSoloConEnvios(false);
-    };
-
-    window.addEventListener("simulacion:limpiada", onClean);
-    return () => window.removeEventListener("simulacion:limpiada", onClean);
-  }, []);
-
-
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
       <div
         style={{
           position: "absolute",
-          top: 10,
-          left: "50%",
-          transform: "translateX(-50%)",
+          top: 3,
+          left: controlesAbiertos ? "50%" : 45,
+          transform: controlesAbiertos ? "translateX(-50%)" : "none",
           zIndex: 1400,
           display: "flex",
-          gap: 12,
-          alignItems: "center",
+          gap: 10,
+          alignItems: "flex-start",
           pointerEvents: "auto",
         }}
       >
         <HoraActual style={{ position: "relative" }} />
-        {/* 👉 Pasamos aeropuertos a la barra de control vía props */}
-        <SimulationControlsDia airports={airports} />
+
+        {controlesAbiertos ? (
+          <div style={{ position: "relative" }}>
+            <SimulationControlsDia airports={airports} />
+
+            <button
+              type="button"
+              onClick={() => setControlesAbiertos(false)}
+              title="Ocultar controles"
+              style={{
+                position: "absolute",
+                top: -3,
+                right: -10,
+                zIndex: 2000,
+                width: 27,
+                height: 27,
+                borderRadius: 999,
+                border: "1px solid rgba(0,0,0,0.12)",
+                background: "white",
+                cursor: "pointer",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+                fontWeight: 600,
+                lineHeight: "28px",
+                color: "#0f172a",
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setControlesAbiertos(true)}
+            title="Mostrar controles"
+            style={{
+              alignSelf: "flex-start",
+              marginTop: 0,
+              padding: "3px 6px",
+              borderRadius: 12,
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              fontWeight: 300,
+              color: "white",
+              background: "linear-gradient(135deg, #1976d2 0%, #1565c0 100%)",
+              boxShadow: "0 8px 24px rgba(25,118,210,0.35)",
+            }}
+          >
+            ⚙️
+          </button>
+        )}
       </div>
+
+
+
 
       <button
         onClick={() => setSoloConEnvios(!soloConEnvios)}

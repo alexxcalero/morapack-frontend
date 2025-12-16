@@ -13,7 +13,6 @@ import ReactDOMServer from "react-dom/server";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
-import ModalResumen from "./ModalResumen";
 import useWebSocket from "../../../lib/useWebSocket";
 import { obtenerRutasEnvio, obtenerEnviosPendientes } from "../../../lib/envios";
 
@@ -79,12 +78,6 @@ const iconUrls = {
   violet: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png",
   orange: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png",
 };
-
-const BlueIcon = L.icon({ iconUrl: iconUrls.blue, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const GreenIcon = L.icon({ iconUrl: iconUrls.green, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const OrangeIcon = L.icon({ iconUrl: iconUrls.orange, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const RedIcon = L.icon({ iconUrl: iconUrls.red, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const UnknownIcon = L.icon({ iconUrl: iconUrls.violet, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
 
 // ✅ ÍCONOS PERSONALIZADOS PARA ALMACENES (respuesta a retroalimentación del profesor)
 // Almacén Principal: Edificio industrial con estrella (Lima, Bruselas, Bakú)
@@ -416,8 +409,6 @@ export default function Mapa() {
   const [soloConEnvios, setSoloConEnvios] = useState(false); // ← filtro de vuelos con envíos
   const [flyTarget, setFlyTarget] = useState(null);
   const [navegando, setNavegando] = useState(false);
-  const [controlesAbiertos, setControlesAbiertos] = useState(true);
-
 
   // Estados para visualizar rutas de envíos
   const [rutasEnvioSeleccionado, setRutasEnvioSeleccionado] = useState(null);
@@ -1949,80 +1940,10 @@ export default function Mapa() {
 
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
-      <div
-        style={{
-          position: "absolute",
-          top: 3, // más arriba
-          left: controlesAbiertos ? "50%" : 45,
-          transform: controlesAbiertos ? "translateX(-50%)" : "none",
-          zIndex: 1400,
-          display: "flex",
-          gap: 10,
-          alignItems: "flex-start",
-          pointerEvents: "auto",
-        }}
-      >
-        <HoraActual
-          simulacionIniciada={simulacionIniciada}
-          startStr={null}
-          style={{ position: "relative" }}
-        />
-
-        {controlesAbiertos ? (
-          <div style={{ position: "relative" }}>
-            <SimulationControls startStr={null} />
-
-            {/* Botón para ocultar */}
-            <button
-              type="button"
-              onClick={() => setControlesAbiertos(false)}
-              title="Ocultar controles"
-              style={{
-                position: "absolute",
-                top: -3,
-                right: -10,
-                zIndex: 2000,
-                width: 27,
-                height: 27,
-                borderRadius: 999,
-                border: "1px solid rgba(0,0,0,0.12)",
-                background: "white",
-                cursor: "pointer",
-                boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
-                fontWeight: 600,
-                lineHeight: "28px",
-                color: "#0f172a",
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ) : (
-          // Botón para mostrar (izquierda, arriba)
-          <button
-            type="button"
-            onClick={() => setControlesAbiertos(true)}
-            title="Mostrar controles"
-            style={{
-              alignSelf: "flex-start",
-              marginTop: 0,
-              padding: "3px 6px",
-              borderRadius: 12,
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              fontWeight: 300,
-              color: "white",
-              background: "linear-gradient(135deg, #1976d2 0%, #1565c0 100%)",
-              boxShadow: "0 8px 24px rgba(25,118,210,0.35)",
-            }}
-          >
-            ⚙️
-          </button>
-        )}
+      <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
+        <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} />
+        <SimulationControls startStr={null} />
       </div>
-
 
       {/* ✅ Botón de filtro: Solo vuelos con envíos */}
       <button
@@ -2039,7 +1960,7 @@ export default function Mapa() {
           borderRadius: 10,
           cursor: "pointer",
           fontWeight: 600,
-          fontSize: 16,
+          fontSize: 13,
           boxShadow: soloConEnvios ? "0 4px 12px rgba(16, 185, 129, 0.4)" : "0 4px 12px rgba(0,0,0,0.15)",
           pointerEvents: "auto",
           transition: "all 0.3s ease",
@@ -2408,13 +2329,6 @@ export default function Mapa() {
         </MapContainer>
       )}
 
-      {/* Modal de resumen de simulación */}
-      <ModalResumen
-        isOpen={mostrarModalResumen}
-        onClose={() => setMostrarModalResumen(false)}
-        resumen={datosResumen}
-        esDetenida={esSimulacionDetenida}
-      />
     </div>
   );
 }
