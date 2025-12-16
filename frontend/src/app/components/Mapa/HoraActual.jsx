@@ -28,7 +28,7 @@ function fmtElapsed(ms) {
   return `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }
 
-export default function HoraActual({ simulacionIniciada = false }) {
+export default function HoraActual({ simulacionIniciada = false, onRealElapsed }) {
   const [realNow, setRealNow] = useState(() => new Date());
   const [simNow, setSimNow] = useState(null);
   const [realElapsed, setRealElapsed] = useState(0);
@@ -141,7 +141,11 @@ export default function HoraActual({ simulacionIniciada = false }) {
           setSimElapsed(simMs - simStartRef.current);
         }
         if (realStartRef.current != null) {
-          setRealElapsed(nowRealMs - realStartRef.current);
+          const elapsed = nowRealMs - realStartRef.current;
+          setRealElapsed(elapsed);
+          if (typeof onRealElapsed === 'function') {
+            onRealElapsed(elapsed);
+          }
         }
       }
 
@@ -154,7 +158,7 @@ export default function HoraActual({ simulacionIniciada = false }) {
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, []);
+  }, [onRealElapsed]);
 
   const box = {
     display: "flex",
