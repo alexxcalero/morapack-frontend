@@ -400,6 +400,8 @@ const PLANE_ICON_OFFSET_DEG = -45; // Offset manual (ajústalo): - Si el icono a
 const DEBUG_HEADING = false;
 
 export default function Mapa() {
+  // Estado levantado para la fecha de inicio de la simulación
+  const [fechaInicioSimulacion, setFechaInicioSimulacion] = useState("");
   const mapRef = useRef(null);
   const [rawAirports, setRawAirports] = useState(null);
   const [dynamicAirports, setDynamicAirports] = useState(null); // ← aeropuertos desde /vuelos-ultimo-ciclo
@@ -2019,7 +2021,7 @@ export default function Mapa() {
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
       <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
         <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} onRealElapsed={setRealElapsed} />
-        <SimulationControls startStr={null} />
+        <SimulationControls startStr={null} onFechaInicioChange={setFechaInicioSimulacion} />
       </div>
 
       {/* ✅ Botón de filtro: Solo vuelos con envíos */}
@@ -2414,6 +2416,7 @@ export default function Mapa() {
         esDetenida={esSimulacionDetenida}
         realElapsed={realElapsedFinal}
         simNow={simNowFinal}
+        fechaInicio={fechaInicioSimulacion}
       />
     </div>
   );
