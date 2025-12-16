@@ -14,7 +14,7 @@ function fmtElapsed(ms) {
     return `${m}min`;
 }
 
-export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = false, realElapsed, simNow }) {
+export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = false, realElapsed, simNow, fechaInicio }) {
     if (!isOpen) return null;
 
     // Formatear fechas
@@ -114,7 +114,7 @@ export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = fa
                 {/* Content */}
                 <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
                     <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
-                        Fecha de Inicio: <span style={{ fontWeight: 400 }}>{formatearFecha(resumen?.fechaInicio)}</span>
+                        Fecha de Inicio: <span style={{ fontWeight: 400 }}>{formatearFecha(fechaInicio)}</span>
                     </div>
                     <div style={{ fontSize: '15px', color: '#334155', fontWeight: 600, marginBottom: 6 }}>
                         Fecha de Fin: <span style={{ fontWeight: 400 }}>{formatearFechaSimulada(simNow)}</span>

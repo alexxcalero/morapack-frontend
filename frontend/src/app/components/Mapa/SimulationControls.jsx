@@ -5,7 +5,7 @@ import React, { useEffect, useState, useMemo } from "react";
 // URL base del backend (configurable por env NEXT_PUBLIC_BACKEND_URL)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
-export default function SimulationControls({ startStr = null }) {
+export default function SimulationControls({ startStr = null, onFechaInicioChange }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
     const [iniciando, setIniciando] = useState(false); // ← estado separado para iniciar sin bloquear UI
     const [inicializando, setInicializando] = useState(false); // ← estado para el botón inicializar
@@ -264,7 +264,12 @@ export default function SimulationControls({ startStr = null }) {
                 <input
                     type="datetime-local"
                     value={fechaInicio}
-                    onChange={(e) => setFechaInicio(e.target.value)}
+                    onChange={(e) => {
+                        setFechaInicio(e.target.value);
+                        if (typeof onFechaInicioChange === 'function') {
+                            onFechaInicioChange(e.target.value);
+                        }
+                    }}
                     style={inputStyle}
                     title="Fecha de inicio de la simulación"
                 />
