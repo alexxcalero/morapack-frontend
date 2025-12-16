@@ -428,8 +428,76 @@ export default function Mapa() {
 
   // Estados para el modal de resumen
   const [mostrarModalResumen, setMostrarModalResumen] = useState(false);
-  const [datosResumen, setDatosResumen] = useState(null);
+  const [datosResumen, setDatosResumenRaw] = useState(null);
+  // Estado para el tiempo real transcurrido
+  const [realElapsed, setRealElapsed] = useState(0);
+  // Valor congelado de realElapsed al detener la simulación
+  const realElapsedCongeladoRef = useRef(null);
+  // Setter seguro para datosResumen: no permite sobrescribir si el modal está abierto y la simulación está detenida
+  const setDatosResumen = (value) => {
+    if (mostrarModalResumen && esSimulacionDetenida) {
+      // No sobrescribir el resumen mientras el modal está abierto y la simulación está detenida
+      return;
+    }
+    setDatosResumenRaw(value);
+  };
   const [esSimulacionDetenida, setEsSimulacionDetenida] = useState(false);
+  // Congelar el resumen mostrado cuando la simulación está detenida y el modal está abierto
+  const resumenCongeladoRef = useRef(null);
+
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && datosResumen) {
+      resumenCongeladoRef.current = datosResumen;
+    }
+    // Si se cierra el modal, limpiar el resumen congelado
+    if (!mostrarModalResumen) {
+      resumenCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, datosResumen]);
+
+  // Si la simulación está detenida y el modal está abierto, siempre mostrar el resumen congelado
+  const datosResumenFinal = (mostrarModalResumen && esSimulacionDetenida && resumenCongeladoRef.current)
+    ? resumenCongeladoRef.current
+    : datosResumen;
+
+  // Congelar el valor de realElapsed cuando se detiene la simulación y se muestra el resumen
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && realElapsed != null) {
+      if (realElapsedCongeladoRef.current == null) {
+        realElapsedCongeladoRef.current = realElapsed;
+      }
+    }
+    if (!mostrarModalResumen) {
+      realElapsedCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, realElapsed]);
+
+
+  // Manejar simNow (fecha/hora simulada) congelada al detener
+  const [simNow, setSimNow] = useState(() => getSimMs() ? new Date(getSimMs()) : null);
+  const simNowCongeladoRef = useRef(null);
+  useEffect(() => {
+    const unsub = subscribe(ms => setSimNow(new Date(ms)));
+    return () => unsub();
+  }, []);
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && simNow) {
+      if (simNowCongeladoRef.current == null) {
+        simNowCongeladoRef.current = simNow;
+      }
+    }
+    if (!mostrarModalResumen) {
+      simNowCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, simNow]);
+  const simNowFinal = (mostrarModalResumen && esSimulacionDetenida && simNowCongeladoRef.current)
+    ? simNowCongeladoRef.current
+    : simNow;
+
+  // Usar el valor congelado si corresponde
+  const realElapsedFinal = (mostrarModalResumen && esSimulacionDetenida && realElapsedCongeladoRef.current != null)
+    ? realElapsedCongeladoRef.current
+    : realElapsed;
 
   // 🔄 Contador de ciclos para refrescar catálogo cuando llegan nuevos envíos
   const [cicloActual, setCicloActual] = useState(0);
@@ -443,8 +511,12 @@ export default function Mapa() {
   }, []);
 
   // 🛑 Listener para detención inmediata de simulación
+  // Solo obtener y mostrar el resumen UNA VEZ cuando el planificador se detiene
   useEffect(() => {
-    const handleDetener = async () => {
+    let resumenMostrado = false;
+    const handleDetener = async (event) => {
+      if (resumenMostrado || mostrarModalResumen) return;
+      resumenMostrado = true;
       console.log('🛑 Evento de detención recibido');
 
       // Limpiar inmediatamente los vuelos
@@ -453,45 +525,43 @@ export default function Mapa() {
       setLocalAirportCapacities({});
       wasRunningRef.current = false;
 
-      // Obtener resumen de planificación
-      try {
-        const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
-        if (resumenRes.ok) {
-          const data = await resumenRes.json();
-          console.log('📊 Resumen de planificación al detener:', data);
-
-          // Transformar datos del backend al formato que espera el modal
-          const statsPedidos = data.estadisticasPedidos || {};
-          const statsPorEstado = data.estadisticasPorEstado || {};
-          const infoGeneral = data.informacionGeneral || {};
-
-          const resumenFormateado = {
-            totalEnvios: statsPedidos.totalPedidos || 0,
-            enviosEntregados: statsPorEstado.enviosEntregados || 0,
-            enviosEnTransito: statsPorEstado.enviosEnRuta || 0,
-            enviosPendientes: (statsPorEstado.enviosRegistrados || 0) + (statsPorEstado.enviosPlanificados || 0),
-            porcentajeCompletado: statsPedidos.tasaExito || 0,
-            duracionSimulacion: calcularDuracionSimulacion(
-              infoGeneral.fechaInicio,
-              infoGeneral.fechaFin,
-              infoGeneral.cicloActual
-            ),
-            // Datos adicionales del backend
-            pedidosCompletados: statsPedidos.pedidosCompletados || 0,
-            pedidosParciales: statsPedidos.pedidosParciales || 0,
-            enviosPlanificados: statsPorEstado.enviosPlanificados || 0,
-            enviosFinalizados: statsPorEstado.enviosFinalizados || 0,
-          };
-
-          // Mostrar modal de resumen
-          setDatosResumen(resumenFormateado);
-          setEsSimulacionDetenida(true);
-          setMostrarModalResumen(true);
+      // Usar resumen del evento si está disponible
+      let data = event?.detail?.resumen || null;
+      if (!data) {
+        try {
+          const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+          if (resumenRes.ok) {
+            data = await resumenRes.json();
+          }
+        } catch (error) {
+          console.error('❌ Error al obtener resumen al detener:', error);
         }
-      } catch (error) {
-        console.error('❌ Error al obtener resumen al detener:', error);
-        // Fallback: abrir modal vacío para informar detención
-        setDatosResumen({
+      }
+
+      if (data) {
+        // Transformar datos del backend al formato que espera el modal
+        const statsPedidos = data.estadisticasPedidos || {};
+        const infoGeneral = data.informacionGeneral || {};
+
+        // Preparar solo los datos requeridos para el resumen semanal
+        const resumenFormateado = {
+          fechaInicio: infoGeneral.fechaInicio || null,
+          fechaFin: infoGeneral.fechaFin || null,
+          duracionSimulacion: calcularDuracionSimulacion(
+            infoGeneral.fechaInicio,
+            infoGeneral.fechaFin,
+            infoGeneral.cicloActual
+          ),
+          totalCiclosCompletados: infoGeneral.totalCiclosCompletados ?? infoGeneral.cicloActual ?? null,
+          pedidosCompletados: statsPedidos.pedidosCompletados ?? statsPedidos.totalPedidos ?? null,
+          totalPedidos: statsPedidos.totalPedidos ?? null,
+        };
+
+        setDatosResumenRaw(resumenFormateado);
+        setEsSimulacionDetenida(true);
+        setMostrarModalResumen(true);
+      } else {
+        setDatosResumenRaw({
           totalEnvios: 0,
           enviosEntregados: 0,
           enviosEnTransito: 0,
@@ -506,7 +576,7 @@ export default function Mapa() {
 
     window.addEventListener('planificador:detenido', handleDetener);
     return () => window.removeEventListener('planificador:detenido', handleDetener);
-  }, []);
+  }, [mostrarModalResumen]);
 
   // 🔌 WebSocket: Actualizaciones en tiempo real del planificador (manteniendo polling como fallback)
   const { connected: wsConnected, error: wsError, usingSockJS } = useWebSocket({
@@ -1948,7 +2018,7 @@ export default function Mapa() {
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
       <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
-        <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} />
+        <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} onRealElapsed={setRealElapsed} />
         <SimulationControls startStr={null} />
       </div>
 
@@ -2340,8 +2410,10 @@ export default function Mapa() {
       <ModalResumen
         isOpen={mostrarModalResumen}
         onClose={() => setMostrarModalResumen(false)}
-        resumen={datosResumen}
+        resumen={datosResumenFinal}
         esDetenida={esSimulacionDetenida}
+        realElapsed={realElapsedFinal}
+        simNow={simNowFinal}
       />
     </div>
   );

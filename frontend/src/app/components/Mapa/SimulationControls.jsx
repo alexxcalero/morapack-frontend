@@ -174,7 +174,23 @@ export default function SimulationControls({ startStr = null }) {
         setEstado({ activo: false, cargando: true });
 
         try {
-            // Llamar al backend para detener
+            // 1. Obtener el resumen ANTES de detener el planificador
+            let resumenData = null;
+            try {
+                const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+                if (resumenRes.ok) {
+                    resumenData = await resumenRes.json();
+                }
+            } catch (e) {
+                console.error('Error obteniendo resumen antes de detener:', e);
+            }
+
+            // 2. Emitir evento con el resumen para que el mapa lo muestre
+            try {
+                window.dispatchEvent(new CustomEvent('planificador:detenido', { detail: { resumen: resumenData } }));
+            } catch { }
+
+            // 3. Llamar al backend para detener
             await fetch(`${API_BASE}/api/planificador/detener`, { method: "POST" });
 
             // Esperar un poco para que el backend termine de cancelar eventos
@@ -196,9 +212,6 @@ export default function SimulationControls({ startStr = null }) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 intentos++;
             }
-
-            // Ahora sí emitir evento de detención (después de confirmar)
-            try { window.dispatchEvent(new Event('planificador:detenido')); } catch { }
 
         } catch (error) {
             console.error('Error al detener:', error);
