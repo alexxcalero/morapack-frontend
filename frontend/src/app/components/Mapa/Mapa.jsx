@@ -2021,10 +2021,84 @@ export default function Mapa() {
 
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
-      <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
-        <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} onRealElapsed={setRealElapsed} />
-        <SimulationControls startStr={null} onFechaInicioChange={setFechaInicioSimulacion} />
-      </div>
+      <div
+  style={{
+    position: "absolute",
+    top: 3, // más arriba
+    left: controlesAbiertos ? "50%" : 45,
+    transform: controlesAbiertos ? "translateX(-50%)" : "none",
+    zIndex: 1400,
+    display: "flex",
+    gap: 12,
+    alignItems: "flex-start",
+    pointerEvents: "auto",
+  }}
+>
+  <HoraActual
+    simulacionIniciada={simulacionIniciada}
+    startStr={null}
+    style={{ position: "relative" }}
+    onRealElapsed={setRealElapsed}
+  />
+
+  {controlesAbiertos ? (
+    <div style={{ position: "relative" }}>
+      <SimulationControls
+        startStr={null}
+        onFechaInicioChange={setFechaInicioSimulacion}
+      />
+
+      {/* Botón pequeño para ocultar */}
+      <button
+        type="button"
+        onClick={() => setControlesAbiertos(false)}
+        title="Ocultar controles"
+        style={{
+          position: "absolute",
+          top: -3,
+          right: -10,
+          zIndex: 2000,
+          width: 27,
+          height: 27,
+          borderRadius: 999,
+          border: "1px solid rgba(0,0,0,0.12)",
+          background: "white",
+          cursor: "pointer",
+          boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+          fontWeight: 600,
+          lineHeight: "28px",
+          color: "#0f172a",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  ) : (
+    // Botón para volver a mostrar (arriba, a la izquierda)
+    <button
+      type="button"
+      onClick={() => setControlesAbiertos(true)}
+      title="Mostrar controles"
+      style={{
+        alignSelf: "flex-start",
+        marginTop: 0,
+        padding: "3px 6px",
+        borderRadius: 12,
+        border: "none",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        fontWeight: 300,
+        color: "white",
+        background: "linear-gradient(135deg, #1976d2 0%, #1565c0 100%)",
+        boxShadow: "0 8px 24px rgba(25,118,210,0.35)",
+      }}
+    >
+      ⚙️
+    </button>
+  )}
+</div>
+
 
 
       {/* ✅ Botón de filtro: Solo vuelos con envíos */}
