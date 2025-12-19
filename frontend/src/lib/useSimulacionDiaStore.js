@@ -17,10 +17,15 @@ export function useSimulacionDiaStore() {
   const clientRef = useRef(null);
 
   useEffect(() => {
-    // Usar el endpoint con SockJS habilitado
-    const wsUrl =
-      process.env.NEXT_PUBLIC_BACKEND_WS_SOCKJS_URL ||
-      "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion-sockjs";
+    // Primero verificar variable específica de WebSocket, luego variable general, luego fallback
+    const baseUrl = process.env.NEXT_PUBLIC_BACKEND_WS_SOCKJS_URL
+      || process.env.NEXT_PUBLIC_BACKEND_URL
+      || "https://1inf54-981-5e.inf.pucp.edu.pe";
+
+    // Formar la cadena completa del endpoint
+    const wsUrl = baseUrl.includes('/ws-planificacion-sockjs')
+      ? baseUrl
+      : `${baseUrl}/ws-planificacion-sockjs`;
 
     const socket = new SockJS(wsUrl);
     const client = new Client({

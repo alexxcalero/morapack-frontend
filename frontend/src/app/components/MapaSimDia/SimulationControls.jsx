@@ -352,9 +352,15 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
     // 🔔 Hook STOMP: control de limpieza + reloj de simulación día a día
     useEffect(() => {
-        const wsUrl =
-            process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
-            "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
+        // Primero verificar variable específica de WebSocket, luego variable general, luego fallback
+        const baseUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL
+            || process.env.NEXT_PUBLIC_BACKEND_URL
+            || "https://1inf54-981-5e.inf.pucp.edu.pe";
+
+        // Formar la cadena completa del endpoint
+        const wsUrl = baseUrl.includes('/ws-planificacion')
+            ? baseUrl
+            : `${baseUrl}/ws-planificacion`;
 
         const socket = new SockJS(wsUrl);
         const client = new Client({

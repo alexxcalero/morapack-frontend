@@ -1,4 +1,4 @@
-const BASE = "https://1inf54-981-5e.inf.pucp.edu.pe";
+const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 const ENDPOINT = `${BASE}/api/planesDeVuelo/obtenerTodos`;
 
 let _cache = null;

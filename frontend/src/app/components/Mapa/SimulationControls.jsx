@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 
 // URL base del backend (configurable por env NEXT_PUBLIC_BACKEND_URL)
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
 
 export default function SimulationControls({ startStr = null, onFechaInicioChange }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
@@ -131,7 +131,7 @@ export default function SimulationControls({ startStr = null, onFechaInicioChang
             // la "Fecha / Hora simulada" coincida con la ingresada por el usuario.
             // El usuario ingresa hora local, pero el motor interno interpreta en UTC.
             // Ajustamos aquí para alinear la visualización posterior.
-            inicio.setHours(inicio.getHours() + 5);
+            inicio.setHours(inicio.getHours());
             const fin = new Date(inicio);
             fin.setDate(fin.getDate() + 7);
 

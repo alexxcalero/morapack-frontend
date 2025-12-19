@@ -3,6 +3,8 @@
 import React from 'react';
 import { X, CheckCircle2, Truck, Clock, Package, TrendingUp } from 'lucide-react';
 
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+
 function fmtElapsed(ms) {
     if (ms == null || ms < 0) return "0min";
     const s = Math.floor(ms / 1000);
@@ -153,7 +155,7 @@ export default function ModalResumen({ isOpen, onClose, resumen, esDetenida = fa
                     <button
                         onClick={() => {
                             // Descargar el reporte desde el backend remoto
-                            fetch('https://1inf54-981-5e.inf.pucp.edu.pe/api/planificador/descargar-reporte')
+                            fetch(`${API_BASE}/api/planificador/descargar-reporte`)
                                 .then(async (res) => {
                                     if (!res.ok) throw new Error('No se pudo descargar el reporte');
                                     const blob = await res.blob();
