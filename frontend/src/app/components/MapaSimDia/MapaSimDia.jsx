@@ -191,14 +191,18 @@ function parsePlanificadorTime(s) {
 
   const t = s.trim();
 
-  const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})(?:\s*\(UTC([+\-]\d{2}):(\d{2})\))?$/);
+  const m = t.match(
+    /^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s*\(UTC([+\-]\d{2}):(\d{2})\))?$/
+  );
+
 
   if (!m) {
     const d = new Date(t.replace(/\s*\(UTC[^\)]+\)\s*$/, ""));
     return isNaN(d.getTime()) ? null : d;
   }
 
-  const [, datePart, hhStr, mmStr, offHStr = "+00", offMStr = "00"] = m;
+  const [, datePart, hhStr, mmStr, ssStr = "0", offHStr = "+00", offMStr = "00"] = m;
+  const ss = parseInt(ssStr, 10) || 0;
   const [y, mo, day] = datePart.split("-").map((x) => parseInt(x, 10));
   const hh = parseInt(hhStr, 10),
     mm = parseInt(mmStr, 10);
@@ -208,9 +212,8 @@ function parsePlanificadorTime(s) {
   const sign = offH >= 0 ? 1 : -1;
   const offsetMinutes = Math.abs(offH) * 60 + (offM || 0);
   const totalOffsetMs = sign * offsetMinutes * 60 * 1000;
-  const localUtcMs = Date.UTC(y, mo - 1, day, hh, mm, 0);
-  const utcMillis = localUtcMs - totalOffsetMs;
-
+  const localAsUtcMs = Date.UTC(y, mo - 1, day, hh, mm, ss);
+  const utcMillis = localAsUtcMs - totalOffsetMs;
   return new Date(utcMillis);
 }
 
@@ -333,67 +336,48 @@ export default function MapaSimDiaria() {
   const [flyTarget, setFlyTarget] = useState(null);
   const [controlesAbiertos, setControlesAbiertos] = useState(true);
 
-
-
   useEffect(() => {
-    const autostart = async () => {
+    let mounted = true;
+
+    async function loadVuelosCirculando() {
       try {
-        // Timeout de seguridad (evita requests colgadas)
-        const controller = new AbortController();
-        const t = setTimeout(() => controller.abort(), 12_000);
+        const res = await fetch(`${API_BASE}/api/planificador/vuelos-circulando`);
+        if (!mounted) return;
+        if (!res.ok) return;
 
-        const resp = await fetch(
-          `${API_BASE}/api/planificador/autostart-simulacion-dia`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: controller.signal,
-          }
-        );
+        const data = await res.json();
+        const vuelosCirculando = Array.isArray(data?.vuelos) ? data.vuelos : (Array.isArray(data) ? data : []);
 
-        clearTimeout(t);
+        // 🔁 reemplaza cache SOLO con los circulando (ligero para render)
+        setVuelosCache(prev => {
+          const prevById = new Map((prev || []).map(v => [String(v.id), v]));
 
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => null);
-          console.error("[autostart] HTTP " + resp.status + (txt ? " - " + txt : ""));
-          return;
-        }
-
-        const data = await resp.json().catch(() => ({}));
-        console.log("[autostart] respuesta:", data);
-
-        const vuelosInit = Array.isArray(data?.vuelos) ? data.vuelos : [];
-
-        if (vuelosInit.length > 0) {
-          // 1) Sembrar el cache para que el mapa dibuje ya (merge por id)
-          setVuelosCache((prev) => {
-            const prevArr = Array.isArray(prev) ? prev : [];
-            const m = new Map(prevArr.map((v) => [v?.id, v]).filter(([id]) => id != null));
-            for (const v of vuelosInit) {
-              if (v?.id == null) continue;
-              m.set(v.id, { ...(m.get(v.id) || {}), ...v });
-            }
-            return Array.from(m.values());
+          return (vuelosCirculando || []).map(v => {
+            const old = prevById.get(String(v.id));
+            return {
+              ...v,
+              // conservar envíos/historial si el endpoint ligero no los trae
+              enviosAsignados: Array.isArray(v.enviosAsignados) ? v.enviosAsignados : (old?.enviosAsignados ?? []),
+              __historialEnviosCompletos: old?.__historialEnviosCompletos ?? [],
+              __tuvoEnvios: old?.__tuvoEnvios ?? (Array.isArray(v.enviosAsignados) && v.enviosAsignados.length > 0),
+            };
           });
+        });
 
-          // 2) (Opcional) setRawVuelos si lo usas en algún lado
-          setRawVuelos(vuelosInit);
-        }
 
-        // 3) Forzar refresco inmediato del polling (si lo estás escuchando)
-        try {
-          window.dispatchEvent(new Event("planificador:iniciado"));
-        } catch { }
-      } catch (err) {
-        if (err?.name === "AbortError") {
-          console.error("[autostart] timeout (AbortError)");
-        } else {
-          console.error("[autostart] error llamando al backend:", err);
-        }
+        // (opcional) también actualiza aeropuertos/horizonte si vienen
+        if (data?.horizonte) setHorizonte(data.horizonte);
+        if (Array.isArray(data?.aeropuertos)) setDynamicAirports(data.aeropuertos);
+      } catch (e) {
+        console.error(e);
       }
-    };
+    }
 
-    autostart();
+    const iv = setInterval(loadVuelosCirculando, 2_000);
+    return () => {
+      mounted = false;
+      clearInterval(iv);
+    };
   }, []);
 
 
@@ -656,12 +640,9 @@ export default function MapaSimDiaria() {
           Number.isFinite(v.latOrigen) &&
           Number.isFinite(v.lonOrigen) &&
           Number.isFinite(v.latDestino) &&
-          Number.isFinite(v.lonDestino) &&
-          v.horaOrigen instanceof Date &&
-          !isNaN(v.horaOrigen.getTime()) &&
-          v.horaDestino instanceof Date &&
-          !isNaN(v.horaDestino.getTime())
+          Number.isFinite(v.lonDestino)
       );
+
   }, [vuelosCache, airportsById]);
 
   const calcularPosicion = (vuelo, nowMsLocal) => {
@@ -1017,6 +998,55 @@ export default function MapaSimDiaria() {
   }, []);
   const handleCerrarAeropuerto = useCallback(() => setAeropuertoDetalle(null), []);
 
+
+  useEffect(() => {
+    console.log({
+      vuelosCache: vuelosCache?.length ?? 0,
+      vuelosParseados: vuelos?.length ?? 0,
+      filtrados: vuelosFiltrados?.length ?? 0,
+      renderizadosUnicos: vuelosFiltradosUnicos?.length ?? 0,
+      conEnvios: vuelosConEnvios?.length ?? 0,
+    });
+  }, [vuelosCache, vuelos, vuelosFiltrados, vuelosFiltradosUnicos, vuelosConEnvios]);
+
+  const vuelosParaRender = useMemo(() => {
+    if (!Array.isArray(vuelos)) return [];
+    const ahoraMs = throttledNowMs;
+
+    let list = vuelos
+      .map((v) => {
+        // Si no hay fechas válidas, igual dibújalo (en origen por defecto)
+        const horaOriOk = v.horaOrigen instanceof Date && !isNaN(v.horaOrigen.getTime());
+        const horaDesOk = v.horaDestino instanceof Date && !isNaN(v.horaDestino.getTime());
+
+        let pos;
+        if (horaOriOk && horaDesOk) {
+          // calcularPosicion ya hace clamp a [0..1]
+          pos = calcularPosicion(v, ahoraMs);
+        } else {
+          pos = { lat: v.latOrigen, lon: v.lonOrigen, progreso: 0 };
+        }
+
+        if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
+
+        const tieneEnvios = Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0;
+
+        const heading = calcularRumboActual(pos.lat, pos.lon, v.latDestino, v.lonDestino);
+        const rotation = aplicarOffsetRotacion(heading);
+
+        return { ...v, pos, heading, rotation, tieneEnvios };
+      })
+      .filter(Boolean);
+
+    // Respeta tu toggle (si está activado, filtra; si no, muestra todos)
+    if (soloConEnvios) {
+      list = list.filter((v) => v.tieneEnvios || v.raw?.__tuvoEnvios);
+    }
+
+    return list;
+  }, [vuelos, throttledNowMs, soloConEnvios]);
+
+
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
       <div
@@ -1159,6 +1189,25 @@ export default function MapaSimDiaria() {
         onSelectVuelo={handleSelectVueloPanel}
         onSelectEnvio={handleSelectEnvio}
         onSelectAeropuerto={(a) => handleSelectAeropuerto(a, true)}
+        onSelectRutaEnvio={(envio) => {
+          // aquí decides qué hacer al clickear una ruta/envío del catálogo
+          // Ejemplo: si tu envío trae vueloId o vuelosInfo, haces zoom al primer vuelo
+          console.log("📦 Ruta/Envío seleccionado:", envio);
+
+          // Si tienes alguna lógica de selección de vuelo:
+          const primerVueloId =
+            envio?.vuelosInfo?.[0]?.id ??
+            envio?.parteAsignadas?.[0]?.vuelosRuta?.[0]?.id ??
+            null;
+
+          if (primerVueloId != null) {
+            handleSelectVuelo({ id: primerVueloId, idTramo: primerVueloId }, true);
+            setPanelAbierto(false); // opcional: cerrar panel
+          } else {
+            // o abrir un panel detalle de envío si tienes uno
+            // setEnvioDetalle(envio)
+          }
+        }}
         aeropuertos={airports}
         vuelosCache={vuelosCache}
         envios={enviosEnCirculacion}
@@ -1258,50 +1307,35 @@ export default function MapaSimDiaria() {
           );
         })}
 
-        {vuelosFiltradosUnicos.map((v) => {
+        {vuelosParaRender.map((v, idx) => {
           const { pos } = v;
           if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null;
+
           const isSelected = vueloSeleccionado === v.idTramo;
 
           const capacidadMax = v.raw?.capacidadMaxima || 300;
           let capacidadOcupada =
             Array.isArray(v.raw?.enviosAsignados) && v.raw.enviosAsignados.length > 0
-              ? v.raw.enviosAsignados.reduce(
-                (sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0),
-                0
-              )
-              : Array.isArray(v.raw?.__historialEnviosCompletos) &&
-                v.raw.__historialEnviosCompletos.length > 0
-                ? v.raw.__historialEnviosCompletos.reduce(
-                  (sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0),
-                  0
-                )
+              ? v.raw.enviosAsignados.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
+              : Array.isArray(v.raw?.__historialEnviosCompletos) && v.raw.__historialEnviosCompletos.length > 0
+                ? v.raw.__historialEnviosCompletos.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
                 : 0;
+
           const capacidadPct = capacidadMax > 0 ? Math.round((capacidadOcupada / capacidadMax) * 100) : 0;
-          const color = isSelected
-            ? "#2563eb"
-            : capacidadPct <= 60
-              ? "#10b981"
-              : capacidadPct <= 85
-                ? "#f59e0b"
-                : "#dc2626";
+          const color = isSelected ? "#2563eb" : capacidadPct <= 60 ? "#10b981" : capacidadPct <= 85 ? "#f59e0b" : "#dc2626";
 
           const icono = getPlaneIcon(color, v.rotation ?? 0);
 
           return (
             <Marker
-              key={`vu-${v.idTramo}`}
+              key={`vu-${v.idTramo ?? "sinid"}-${idx}`}
               position={[pos.lat, pos.lon]}
               icon={icono}
               zIndexOffset={isSelected ? 1000 : 0}
               eventHandlers={{
                 click: (e) => {
                   e.originalEvent.stopPropagation();
-                  handleSelectVuelo({
-                    id: v.idTramo,
-                    idTramo: v.idTramo,
-                    ...v.raw,
-                  });
+                  handleSelectVuelo({ id: v.idTramo, idTramo: v.idTramo, ...v.raw });
                 },
               }}
             >

@@ -13,8 +13,11 @@ const API_BASE =
 const ENVIO_GET_URL = (fecha) => `${API_BASE}/api/envios/obtenerTodosFecha/${fecha}`;
 const CLEAR_MAP_URL = `${API_BASE}/api/planificador/limpiar-planificacion`;
 const INICIAR_OPS_DIARIAS_URL = `${API_BASE}/api/planificador/iniciar-operaciones-diarias`;
+const REINICIAR_OPS_DIARIAS_URL = `${API_BASE}/api/planificador/reiniciar-simulacion-dia`;
 const RESET_RELOJ_URL = `${API_BASE}/api/simulacion-dia/reloj/reset`;
 const ENVIO_LECTURA_ARCHIVO_URL = `${API_BASE}/api/envios/lecturaArchivo`;
+const ENVIO_ESTADOS_URL = `${API_BASE}/api/envios/conteo-por-estado`;
+const DETENER_URL = `${API_BASE}/api/planificador/detener`;
 
 function msToDatetimeLocal(ms) {
     const d = new Date(ms);
@@ -71,9 +74,21 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
         cliente: "",
     });
 
+    const ESTADOS_DEFAULT = {
+        PLANIFICADO: 0,
+        EN_RUTA: 0,
+        FINALIZADO: 0,
+        ENTREGADO: 0,
+        NULL: 0,
+    };
+
+    const [estadoCounts, setEstadoCounts] = useState(() => ({
+        ...ESTADOS_DEFAULT,
+        total: 0,
+    }));
+
     const [counts, setCounts] = useState({ total: 0, inTransit: 0, waiting: 0 });
     const [enviosCache, setEnviosCache] = useState([]);
-    const simStartRef = useRef(getSimMs() || null);
 
     // 🔒 overlay de bloqueo mientras se limpia el mapa (sincronizado vía STOMP)
     const [isClearing, setIsClearing] = useState(false);
@@ -83,6 +98,52 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
     const fileInputRef = useRef(null);
     const [isUploadingFile, setIsUploadingFile] = useState(false);
+
+
+    async function refreshEstadoCounts() {
+        try {
+            const r = await fetch(ENVIO_ESTADOS_URL);
+            if (!r.ok) throw new Error("conteo-por-estado " + r.status);
+
+            const data = await r.json().catch(() => ({}));
+            if (data?.estado !== "éxito") throw new Error(data?.mensaje || "respuesta inválida");
+
+            const conteos = data?.conteos || {};
+            const merged = { ...ESTADOS_DEFAULT, ...conteos };
+
+            const total =
+                typeof data?.totalEnvios === "number"
+                    ? data.totalEnvios
+                    : Object.values(merged).reduce((a, b) => a + Number(b || 0), 0);
+
+            setEstadoCounts({ ...merged, total });
+        } catch (err) {
+            console.error("[conteo-por-estado] error:", err);
+            setEstadoCounts({ ...ESTADOS_DEFAULT, total: 0 });
+        }
+    }
+
+    useEffect(() => {
+        let mounted = true;
+
+        const run = async () => {
+            if (!mounted) return;
+            await refreshEstadoCounts();
+        };
+
+        run();
+        const iv = setInterval(run, 1_000);
+
+        const onIniciado = () => run();
+        window.addEventListener("planificador:iniciado", onIniciado);
+
+        return () => {
+            mounted = false;
+            clearInterval(iv);
+            window.removeEventListener("planificador:iniciado", onIniciado);
+        };
+    }, []);
+
 
     async function uploadArchivoEnvios(file) {
         if (!file) return;
@@ -110,18 +171,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                 `Envios cargados: ${data.enviosCargados ?? "n/d"}\n` +
                 `Errores: ${data.errores ?? "n/d"}\n` +
                 `Tiempo(s): ${data.tiempoEjecucionSegundos ?? "n/d"}`
-            );
-
-            // (Opcional) refrescar envíos del día actual después de cargar
-            try {
-                const fechaParam = formatFechaParam(getSimMs() || Date.now());
-                const r2 = await fetch(ENVIO_GET_URL(fechaParam));
-                if (r2.ok) {
-                    const data2 = await r2.json();
-                    setEnviosCache(data2 || []);
-                    computeCounts(data2 || []);
-                }
-            } catch { }
+            );            
         } catch (err) {
             console.error("[lecturaArchivo] error:", err);
             alert("❌ Error cargando archivo: " + (err.message || err));
@@ -151,7 +201,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
             // la "Fecha / Hora simulada" coincida con la ingresada por el usuario.
             // El usuario ingresa hora local, pero el motor interno interpreta en UTC.
             // Ajustamos aquí para alinear la visualización posterior.
-            inicio.setHours(inicio.getHours() + 5);
+            inicio.setHours(inicio.getHours());
 
             // Formatear para el backend en formato ISO con T (YYYY-MM-DDTHH:mm:ss)
             const formatoBackend = (d) => {
@@ -247,6 +297,74 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
         setCounts({ total, inTransit, waiting });
     }
+
+    const onApplyInput = async () => {
+        const isoUtc = toUtcIsoWithoutZ(fechaInicio);
+        if (!isoUtc) {
+            alert("Fecha/hora inválida.");
+            return;
+        }
+
+        try {
+            const resp = await fetch(RESET_RELOJ_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fechaInicio: isoUtc }),
+            });
+
+            if (!resp.ok) {
+                const txt = await resp.text().catch(() => null);
+                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
+            }
+
+            const data = await resp.json();
+
+            if (data.estado !== "éxito") {
+                alert("Error al reiniciar reloj de simulación: " + (data.mensaje || "Desconocido"));
+                return;
+            }
+
+            if (typeof data.simMs === "number") {
+                setSimMs(data.simMs);
+                setSimMsState(data.simMs);
+                setFechaInicio(msToDatetimeLocal(data.simMs));
+            }
+
+            /* const resp2 = await fetch(DETENER_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+            });
+
+            if (!resp2.ok) {
+                const txt = await resp.text().catch(() => null);
+                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
+            }
+
+            const resp3 = await fetch(REINICIAR_OPS_DIARIAS_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ fechaInicio: isoUtc }),
+            });
+
+            if (!resp3.ok) {
+                const txt = await resp.text().catch(() => null);
+                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
+            } */
+
+            if (typeof window !== "undefined") {
+                try {
+                    window.dispatchEvent(new Event("planificador:iniciado"));
+                } catch {
+                    // no-op
+                }
+            }
+
+            alert("Reloj de simulación reiniciado correctamente.");
+        } catch (err) {
+            console.error("Error al reiniciar reloj de simulación:", err);
+            alert("Error al reiniciar reloj de simulación: " + (err.message || err));
+        }
+    };
 
     // ---- Add Envio handlers ----
     const openAdd = () => {
@@ -618,22 +736,29 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                 </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    <div style={{ fontSize: 13 }}>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>Total</div>
-                        <div style={{ fontWeight: 700 }}>{counts.total}</div>
+                    <div style={{ marginLeft: 6, fontSize: 12, opacity: 0.7 }}>
+                        Total Envíos: <b>{estadoCounts.total ?? 0}</b>
                     </div>
-                    <div style={{ fontSize: 13 }}>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>En vuelo</div>
-                        <div style={{ fontWeight: 700, color: "#f59e0b" }}>
-                            {counts.inTransit}
-                        </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, auto)", gap: "4px 14px" }}>
+                        {[
+                            
+                            { k: "PLANIFICADO", label: "Planificado" },
+                            { k: "EN_RUTA", label: "En ruta" },
+                            { k: "FINALIZADO", label: "Finalizado" },
+                            { k: "NULL", label: "Sin estado" },
+                        ].map(({ k, label }) => (
+                            <div
+                                key={k}
+                                style={{ marginLeft: 6, fontSize: 12, opacity: 0.7, whiteSpace: "nowrap" }}
+                                title={k}
+                            >
+                                {label}: <b style={{ opacity: 1 }}>{estadoCounts?.[k] ?? 0}</b>
+                            </div>
+                        ))}
                     </div>
-                    <div style={{ fontSize: 13 }}>
-                        <div style={{ fontSize: 11, opacity: 0.7 }}>En espera</div>
-                        <div style={{ fontWeight: 700, color: "#64748b" }}>
-                            {counts.waiting}
-                        </div>
-                    </div>
+
+
+
                 </div>
 
                 <div
@@ -663,7 +788,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                     <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                         <button
                             type="button"
-                            onClick={iniciar}
+                            onClick={onApplyInput}
                             className="btn-primary flex items-center gap-2"
                             disabled={isClearing}
                             style={{

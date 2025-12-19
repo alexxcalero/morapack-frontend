@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { subscribe, initSim } from "../../../lib/simTime";
 
-const LIMA_SIM_START_DATE = new Date(2025, 11, 20, 10, 0, 0); // mes 11 = diciembre
+const LIMA_SIM_START_DATE = new Date(Date.now());
 const SIM_START_DIA_MS = LIMA_SIM_START_DATE.getTime();
 
 export default function HoraActual({
@@ -16,7 +16,6 @@ export default function HoraActual({
 
   useEffect(() => {
     // Inicializar la simulación día a día en tiempo real
-    // partiendo del 20/12/2025 10:00 (Lima)
     if (typeof initSim === "function") {
       initSim({
         startMs: SIM_START_DIA_MS,
@@ -32,32 +31,37 @@ export default function HoraActual({
   const now = new Date(nowMs || Date.now());
   const localeToUse =
     locale || (typeof navigator !== "undefined" ? navigator.language : "es-PE");
-  const timeStr = now.toLocaleTimeString(localeToUse, {
+
+  // ✅ Hora y fecha forzadas a Lima (aunque tu PC tenga otra zona)
+  const timeStr = new Intl.DateTimeFormat(localeToUse, {
+    timeZone: "America/Lima",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
-  const dateStr = now.toLocaleDateString(localeToUse, {
+  }).format(now);
+
+  const dateStr = new Intl.DateTimeFormat(localeToUse, {
+    timeZone: "America/Lima",
     weekday: "short",
     day: "2-digit",
     month: "short",
     year: "numeric",
-  });
+  }).format(now);
 
-  const tzOffsetMin = -now.getTimezoneOffset();
-  const tzSign = tzOffsetMin >= 0 ? "+" : "-";
-  const tzHours = Math.floor(Math.abs(tzOffsetMin) / 60);
-  const tzMins = Math.abs(tzOffsetMin) % 60;
-  const tzStr = `UTC${tzSign}${String(tzHours).padStart(2, "0")}:${String(
-    tzMins
-  ).padStart(2, "0")}`;
+  // ✅ Lima fijo
+  const tzStr = "UTC-05:00";
 
-  const utcStr = new Date(
-    now.getTime() + now.getTimezoneOffset() * 60000
-  )
-    .toISOString()
-    .replace("T", " ")
-    .split(".")[0];
+  // ✅ UTC real
+  const utcStr = new Intl.DateTimeFormat(localeToUse, {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(now);
+
 
   const baseStyle = {
     position: "relative",
