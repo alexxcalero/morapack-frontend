@@ -3,7 +3,6 @@
 
 import React from 'react';
 import Image from 'next/image';
-import Cabecera from './components/Cabecera/Cabecera';
 import { Box, Button, Typography, Grid, Paper } from '@mui/material';
 import Link from 'next/link';
 

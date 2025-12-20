@@ -1,4 +1,4 @@
-// src/lib/useSimulacionDiaSocket.js
+/* // src/lib/useSimulacionDiaSocket.js
 "use client";
 
 import { useEffect } from "react";
@@ -22,7 +22,7 @@ export function useSimulacionDiaSocket(onPayload) {
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
-      debug: () => { }, // o console.log si quieres
+      debug: () => {}, // o console.log si quieres
     });
 
     client.onConnect = () => {
@@ -46,3 +46,4 @@ export function useSimulacionDiaSocket(onPayload) {
     };
   }, [onPayload]);
 }
+ */

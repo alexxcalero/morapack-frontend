@@ -13,7 +13,6 @@ import ReactDOMServer from "react-dom/server";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
-import ModalResumen from "./ModalResumen";
 import useWebSocket from "../../../lib/useWebSocket";
 import { obtenerRutasEnvio, obtenerEnviosPendientes } from "../../../lib/envios";
 
@@ -79,12 +78,6 @@ const iconUrls = {
   violet: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-violet.png",
   orange: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png",
 };
-
-const BlueIcon = L.icon({ iconUrl: iconUrls.blue, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const GreenIcon = L.icon({ iconUrl: iconUrls.green, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const OrangeIcon = L.icon({ iconUrl: iconUrls.orange, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const RedIcon = L.icon({ iconUrl: iconUrls.red, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
-const UnknownIcon = L.icon({ iconUrl: iconUrls.violet, shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png", iconSize: [25, 41], iconAnchor: [12, 41] });
 
 // ✅ ÍCONOS PERSONALIZADOS PARA ALMACENES (respuesta a retroalimentación del profesor)
 // Almacén Principal: Edificio industrial con estrella (Lima, Bruselas, Bakú)
@@ -400,8 +393,6 @@ const PLANE_ICON_OFFSET_DEG = -45; // Offset manual (ajústalo): - Si el icono a
 const DEBUG_HEADING = false;
 
 export default function Mapa() {
-  // Estado levantado para la fecha de inicio de la simulación
-  const [fechaInicioSimulacion, setFechaInicioSimulacion] = useState("");
   const mapRef = useRef(null);
   const [rawAirports, setRawAirports] = useState(null);
   const [dynamicAirports, setDynamicAirports] = useState(null); // ← aeropuertos desde /vuelos-ultimo-ciclo
@@ -418,8 +409,6 @@ export default function Mapa() {
   const [soloConEnvios, setSoloConEnvios] = useState(false); // ← filtro de vuelos con envíos
   const [flyTarget, setFlyTarget] = useState(null);
   const [navegando, setNavegando] = useState(false);
-  const [controlesAbiertos, setControlesAbiertos] = useState(true);
-
 
   // Estados para visualizar rutas de envíos
   const [rutasEnvioSeleccionado, setRutasEnvioSeleccionado] = useState(null);
@@ -432,76 +421,8 @@ export default function Mapa() {
 
   // Estados para el modal de resumen
   const [mostrarModalResumen, setMostrarModalResumen] = useState(false);
-  const [datosResumen, setDatosResumenRaw] = useState(null);
-  // Estado para el tiempo real transcurrido
-  const [realElapsed, setRealElapsed] = useState(0);
-  // Valor congelado de realElapsed al detener la simulación
-  const realElapsedCongeladoRef = useRef(null);
-  // Setter seguro para datosResumen: no permite sobrescribir si el modal está abierto y la simulación está detenida
-  const setDatosResumen = (value) => {
-    if (mostrarModalResumen && esSimulacionDetenida) {
-      // No sobrescribir el resumen mientras el modal está abierto y la simulación está detenida
-      return;
-    }
-    setDatosResumenRaw(value);
-  };
+  const [datosResumen, setDatosResumen] = useState(null);
   const [esSimulacionDetenida, setEsSimulacionDetenida] = useState(false);
-  // Congelar el resumen mostrado cuando la simulación está detenida y el modal está abierto
-  const resumenCongeladoRef = useRef(null);
-
-  useEffect(() => {
-    if (mostrarModalResumen && esSimulacionDetenida && datosResumen) {
-      resumenCongeladoRef.current = datosResumen;
-    }
-    // Si se cierra el modal, limpiar el resumen congelado
-    if (!mostrarModalResumen) {
-      resumenCongeladoRef.current = null;
-    }
-  }, [mostrarModalResumen, esSimulacionDetenida, datosResumen]);
-
-  // Si la simulación está detenida y el modal está abierto, siempre mostrar el resumen congelado
-  const datosResumenFinal = (mostrarModalResumen && esSimulacionDetenida && resumenCongeladoRef.current)
-    ? resumenCongeladoRef.current
-    : datosResumen;
-
-  // Congelar el valor de realElapsed cuando se detiene la simulación y se muestra el resumen
-  useEffect(() => {
-    if (mostrarModalResumen && esSimulacionDetenida && realElapsed != null) {
-      if (realElapsedCongeladoRef.current == null) {
-        realElapsedCongeladoRef.current = realElapsed;
-      }
-    }
-    if (!mostrarModalResumen) {
-      realElapsedCongeladoRef.current = null;
-    }
-  }, [mostrarModalResumen, esSimulacionDetenida, realElapsed]);
-
-
-  // Manejar simNow (fecha/hora simulada) congelada al detener
-  const [simNow, setSimNow] = useState(() => getSimMs() ? new Date(getSimMs()) : null);
-  const simNowCongeladoRef = useRef(null);
-  useEffect(() => {
-    const unsub = subscribe(ms => setSimNow(new Date(ms)));
-    return () => unsub();
-  }, []);
-  useEffect(() => {
-    if (mostrarModalResumen && esSimulacionDetenida && simNow) {
-      if (simNowCongeladoRef.current == null) {
-        simNowCongeladoRef.current = simNow;
-      }
-    }
-    if (!mostrarModalResumen) {
-      simNowCongeladoRef.current = null;
-    }
-  }, [mostrarModalResumen, esSimulacionDetenida, simNow]);
-  const simNowFinal = (mostrarModalResumen && esSimulacionDetenida && simNowCongeladoRef.current)
-    ? simNowCongeladoRef.current
-    : simNow;
-
-  // Usar el valor congelado si corresponde
-  const realElapsedFinal = (mostrarModalResumen && esSimulacionDetenida && realElapsedCongeladoRef.current != null)
-    ? realElapsedCongeladoRef.current
-    : realElapsed;
 
   // 🔄 Contador de ciclos para refrescar catálogo cuando llegan nuevos envíos
   const [cicloActual, setCicloActual] = useState(0);
@@ -515,12 +436,8 @@ export default function Mapa() {
   }, []);
 
   // 🛑 Listener para detención inmediata de simulación
-  // Solo obtener y mostrar el resumen UNA VEZ cuando el planificador se detiene
   useEffect(() => {
-    let resumenMostrado = false;
-    const handleDetener = async (event) => {
-      if (resumenMostrado || mostrarModalResumen) return;
-      resumenMostrado = true;
+    const handleDetener = async () => {
       console.log('🛑 Evento de detención recibido');
 
       // Limpiar inmediatamente los vuelos
@@ -529,43 +446,45 @@ export default function Mapa() {
       setLocalAirportCapacities({});
       wasRunningRef.current = false;
 
-      // Usar resumen del evento si está disponible
-      let data = event?.detail?.resumen || null;
-      if (!data) {
-        try {
-          const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
-          if (resumenRes.ok) {
-            data = await resumenRes.json();
-          }
-        } catch (error) {
-          console.error('❌ Error al obtener resumen al detener:', error);
+      // Obtener resumen de planificación
+      try {
+        const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+        if (resumenRes.ok) {
+          const data = await resumenRes.json();
+          console.log('📊 Resumen de planificación al detener:', data);
+
+          // Transformar datos del backend al formato que espera el modal
+          const statsPedidos = data.estadisticasPedidos || {};
+          const statsPorEstado = data.estadisticasPorEstado || {};
+          const infoGeneral = data.informacionGeneral || {};
+
+          const resumenFormateado = {
+            totalEnvios: statsPedidos.totalPedidos || 0,
+            enviosEntregados: statsPorEstado.enviosEntregados || 0,
+            enviosEnTransito: statsPorEstado.enviosEnRuta || 0,
+            enviosPendientes: (statsPorEstado.enviosRegistrados || 0) + (statsPorEstado.enviosPlanificados || 0),
+            porcentajeCompletado: statsPedidos.tasaExito || 0,
+            duracionSimulacion: calcularDuracionSimulacion(
+              infoGeneral.fechaInicio,
+              infoGeneral.fechaFin,
+              infoGeneral.cicloActual
+            ),
+            // Datos adicionales del backend
+            pedidosCompletados: statsPedidos.pedidosCompletados || 0,
+            pedidosParciales: statsPedidos.pedidosParciales || 0,
+            enviosPlanificados: statsPorEstado.enviosPlanificados || 0,
+            enviosFinalizados: statsPorEstado.enviosFinalizados || 0,
+          };
+
+          // Mostrar modal de resumen
+          setDatosResumen(resumenFormateado);
+          setEsSimulacionDetenida(true);
+          setMostrarModalResumen(true);
         }
-      }
-
-      if (data) {
-        // Transformar datos del backend al formato que espera el modal
-        const statsPedidos = data.estadisticasPedidos || {};
-        const infoGeneral = data.informacionGeneral || {};
-
-        // Preparar solo los datos requeridos para el resumen semanal
-        const resumenFormateado = {
-          fechaInicio: infoGeneral.fechaInicio || null,
-          fechaFin: infoGeneral.fechaFin || null,
-          duracionSimulacion: calcularDuracionSimulacion(
-            infoGeneral.fechaInicio,
-            infoGeneral.fechaFin,
-            infoGeneral.cicloActual
-          ),
-          totalCiclosCompletados: infoGeneral.totalCiclosCompletados ?? infoGeneral.cicloActual ?? null,
-          pedidosCompletados: statsPedidos.pedidosCompletados ?? statsPedidos.totalPedidos ?? null,
-          totalPedidos: statsPedidos.totalPedidos ?? null,
-        };
-
-        setDatosResumenRaw(resumenFormateado);
-        setEsSimulacionDetenida(true);
-        setMostrarModalResumen(true);
-      } else {
-        setDatosResumenRaw({
+      } catch (error) {
+        console.error('❌ Error al obtener resumen al detener:', error);
+        // Fallback: abrir modal vacío para informar detención
+        setDatosResumen({
           totalEnvios: 0,
           enviosEntregados: 0,
           enviosEnTransito: 0,
@@ -580,7 +499,7 @@ export default function Mapa() {
 
     window.addEventListener('planificador:detenido', handleDetener);
     return () => window.removeEventListener('planificador:detenido', handleDetener);
-  }, [mostrarModalResumen]);
+  }, []);
 
   // 🔌 WebSocket: Actualizaciones en tiempo real del planificador (manteniendo polling como fallback)
   const { connected: wsConnected, error: wsError, usingSockJS } = useWebSocket({
@@ -2021,85 +1940,10 @@ export default function Mapa() {
 
   return (
     <div style={{ width: "100%", height: "90vh", overflow: "hidden", position: "relative" }}>
-      <div
-  style={{
-    position: "absolute",
-    top: 3, // más arriba
-    left: controlesAbiertos ? "50%" : 45,
-    transform: controlesAbiertos ? "translateX(-50%)" : "none",
-    zIndex: 1400,
-    display: "flex",
-    gap: 12,
-    alignItems: "flex-start",
-    pointerEvents: "auto",
-  }}
->
-  <HoraActual
-    simulacionIniciada={simulacionIniciada}
-    startStr={null}
-    style={{ position: "relative" }}
-    onRealElapsed={setRealElapsed}
-  />
-
-  {controlesAbiertos ? (
-    <div style={{ position: "relative" }}>
-      <SimulationControls
-        startStr={null}
-        onFechaInicioChange={setFechaInicioSimulacion}
-      />
-
-      {/* Botón pequeño para ocultar */}
-      <button
-        type="button"
-        onClick={() => setControlesAbiertos(false)}
-        title="Ocultar controles"
-        style={{
-          position: "absolute",
-          top: -3,
-          right: -10,
-          zIndex: 2000,
-          width: 27,
-          height: 27,
-          borderRadius: 999,
-          border: "1px solid rgba(0,0,0,0.12)",
-          background: "white",
-          cursor: "pointer",
-          boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
-          fontWeight: 600,
-          lineHeight: "28px",
-          color: "#0f172a",
-        }}
-      >
-        ×
-      </button>
-    </div>
-  ) : (
-    // Botón para volver a mostrar (arriba, a la izquierda)
-    <button
-      type="button"
-      onClick={() => setControlesAbiertos(true)}
-      title="Mostrar controles"
-      style={{
-        alignSelf: "flex-start",
-        marginTop: 0,
-        padding: "3px 6px",
-        borderRadius: 12,
-        border: "none",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        fontWeight: 300,
-        color: "white",
-        background: "linear-gradient(135deg, #1976d2 0%, #1565c0 100%)",
-        boxShadow: "0 8px 24px rgba(25,118,210,0.35)",
-      }}
-    >
-      ⚙️
-    </button>
-  )}
-</div>
-
-
+      <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 1400, display: "flex", gap: 12, alignItems: "center", pointerEvents: "auto" }}>
+        <HoraActual simulacionIniciada={simulacionIniciada} startStr={null} style={{ position: "relative" }} />
+        <SimulationControls startStr={null} />
+      </div>
 
       {/* ✅ Botón de filtro: Solo vuelos con envíos */}
       <button
@@ -2116,7 +1960,7 @@ export default function Mapa() {
           borderRadius: 10,
           cursor: "pointer",
           fontWeight: 600,
-          fontSize: 16,
+          fontSize: 13,
           boxShadow: soloConEnvios ? "0 4px 12px rgba(16, 185, 129, 0.4)" : "0 4px 12px rgba(0,0,0,0.15)",
           pointerEvents: "auto",
           transition: "all 0.3s ease",
@@ -2485,16 +2329,6 @@ export default function Mapa() {
         </MapContainer>
       )}
 
-      {/* Modal de resumen de simulación */}
-      <ModalResumen
-        isOpen={mostrarModalResumen}
-        onClose={() => setMostrarModalResumen(false)}
-        resumen={datosResumenFinal}
-        esDetenida={esSimulacionDetenida}
-        realElapsed={realElapsedFinal}
-        simNow={simNowFinal}
-        fechaInicio={fechaInicioSimulacion}
-      />
     </div>
   );
 }

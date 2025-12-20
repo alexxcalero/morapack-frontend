@@ -8,75 +8,43 @@ import { obtenerEnviosPendientes, obtenerEnviosPlanificadosConRutas, buscarEnvio
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 // Función para parsear fechas del backend
-// ✅ Parser para backend tipo:
-// "2025-01-01 03:34:00Z-5"  | "2025-01-01 03:34:00Z+2" | "2025-01-01 03:34:00" | ISO normal
 function parseBackendTime(s) {
     if (!s) return null;
     const t = String(s).trim();
-
-    // Caso A: "YYYY-MM-DD HH:mm:ssZ-5" o "YYYY-MM-DD HH:mm:ssZ+2"
-    const m = t.match(
-        /^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:Z)?([+\-]?\d+)?$/
-    );
-
-    if (m) {
-        const [, datePart, hhStr, mmStr, ssStr, offStr] = m;
-        const [y, mo, day] = datePart.split("-").map((x) => parseInt(x, 10));
-        const hh = parseInt(hhStr, 10);
-        const mm = parseInt(mmStr, 10);
-        const ss = parseInt(ssStr, 10);
-
-        // offStr = -5, +2, etc. (horas)
-        const offH = offStr ? parseInt(offStr, 10) : 0;
-
-        // Interpreto la hora como "hora local expresada en UTC±offH"
-        // Para pasar a UTC real: UTC = (horaLocal - offH)
-        const utcMillis = Date.UTC(y, mo - 1, day, hh - offH, mm, ss);
-        return new Date(utcMillis);
-    }
-
-    // Caso B: cualquier otro formato que Date entienda (ISO, etc.)
-    const d = new Date(t);
-    return isNaN(d.getTime()) ? null : d;
-}
-
-// ✅ Parser para planificador tipo:
-// "YYYY-MM-DD HH:mm" o "YYYY-MM-DD HH:mm:ss" opcional
-// con "(UTC-05:00)" opcional
-function parsePlanificadorTime(s) {
-    if (!s || typeof s !== "string") return null;
-
-    const t = s.trim();
-    const m = t.match(
-        /^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?(?:\s*\(UTC([+\-]\d{2}):(\d{2})\))?$/
-    );
-
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:Z)?([+\-]?\d+)?$/);
     if (!m) {
-        // quita "(UTC...)" si existe y deja que Date intente
-        const d = new Date(t.replace(/\s*\(UTC[^\)]+\)\s*$/, ""));
+        const d = new Date(t);
         return isNaN(d.getTime()) ? null : d;
     }
-
-    const [, datePart, hhStr, mmStr, ssStr = "0", offHStr = "+00", offMStr = "00"] = m;
-
-    const [y, mo, day] = datePart.split("-").map((x) => parseInt(x, 10));
-    const hh = parseInt(hhStr, 10);
-    const mm = parseInt(mmStr, 10);
-    const ss = parseInt(ssStr, 10) || 0;
-
-    const offH = parseInt(offHStr, 10);
-    const offM = parseInt(offMStr, 10);
-
-    const sign = offH >= 0 ? 1 : -1;
-    const offsetMinutes = Math.abs(offH) * 60 + (offM || 0);
-    const totalOffsetMs = sign * offsetMinutes * 60 * 1000;
-
-    const localAsUtcMs = Date.UTC(y, mo - 1, day, hh, mm, ss);
-    const utcMillis = localAsUtcMs - totalOffsetMs;
+    const [, datePart, timePart, offStr] = m;
+    const off = offStr ? parseInt(offStr, 10) : 0;
+    const [y, mo, day] = datePart.split("-").map(x => parseInt(x, 10));
+    const [hh, mm, ss] = timePart.split(":").map(x => parseInt(x, 10));
+    const utcMillis = Date.UTC(y, mo - 1, day, hh - off, mm, ss);
     return new Date(utcMillis);
 }
 
-
+// ✅ Parser para "yyyy-MM-dd HH:mm (UTC±hh:mm)" del planificador
+function parsePlanificadorTime(s) {
+    if (!s || typeof s !== "string") return null;
+    const t = s.trim();
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})(?:\s*\(UTC([+\-]\d{2}):(\d{2})\))?$/);
+    if (!m) {
+        const d = new Date(t.replace(/\s*\(UTC[^\)]+\)\s*$/, ""));
+        return isNaN(d.getTime()) ? null : d;
+    }
+    const [, datePart, hhStr, mmStr, offHStr = "+00", offMStr = "00"] = m;
+    const [y, mo, day] = datePart.split("-").map(x => parseInt(x, 10));
+    const hh = parseInt(hhStr, 10), mm = parseInt(mmStr, 10);
+    const offH = parseInt(offHStr, 10), offM = parseInt(offMStr, 10);
+    // Convertir correctamente hora local del huso a UTC
+    const sign = offH >= 0 ? 1 : -1;
+    const offsetMinutes = Math.abs(offH) * 60 + (offM || 0);
+    const totalOffsetMs = sign * offsetMinutes * 60 * 1000;
+    const localUtcMs = Date.UTC(y, mo - 1, day, hh, mm, 0);
+    const utcMillis = localUtcMs - totalOffsetMs;
+    return new Date(utcMillis);
+}
 
 // Componente optimizado para items de aeropuerto
 const AeropuertoItem = memo(({ item, onSelect }) => {
@@ -91,9 +59,7 @@ const AeropuertoItem = memo(({ item, onSelect }) => {
 
     return (
         <div
-            onClick={() => {
-                if (typeof onSelect === "function") onSelect(item);
-            }}
+            onClick={() => onSelect && onSelect(item)}
             style={{
                 padding: '12px',
                 borderBottom: '1px solid #e5e7eb',
@@ -163,16 +129,8 @@ const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
             return ap ? `${ap.ciudad} (${ap.codigo})` : `ID ${item.ciudadDestino ?? item.destino?.id ?? "?"}`;
         })();
 
-    const horaInicio =
-        parsePlanificadorTime(item.horaSalida) ||
-        parseBackendTime(item.horaSalida) ||
-        parseBackendTime(item.horaOrigen);
-
-    const horaFin =
-        parsePlanificadorTime(item.horaLlegada) ||
-        parseBackendTime(item.horaLlegada) ||
-        parseBackendTime(item.horaDestino);
-
+    const horaInicio = parsePlanificadorTime(item.horaSalida) || parseBackendTime(item.horaOrigen);
+    const horaFin = parsePlanificadorTime(item.horaLlegada) || parseBackendTime(item.horaDestino);
 
     const formatearFecha = (fecha) => {
         if (!fecha) return 'N/A';
@@ -197,9 +155,7 @@ const VueloItem = memo(({ item, index, aeropuertos, onSelect }) => {
     return (
         <div
             key={item.id || index}
-            onClick={() => {
-                if (typeof onSelect === "function") onSelect(item);
-            }}
+            onClick={() => onSelect(item)}
             style={{
                 padding: '12px',
                 borderBottom: '1px solid #e5e7eb',
@@ -239,9 +195,7 @@ VueloItem.displayName = 'VueloItem';
 const EnvioItem = memo(({ envio, onSelect }) => {
     return (
         <button
-            onClick={() => {
-                if (typeof onSelect === "function") onSelect(envio);
-            }}
+            onClick={() => onSelect(envio)}
             style={{
                 width: '100%',
                 textAlign: 'left',
@@ -400,9 +354,7 @@ const EnvioPendienteItem = memo(({ envio, onSelect, aeropuertos = [], vuelosMap,
 
     return (
         <div
-            onClick={() => {
-                if (typeof onSelect === "function") onSelect(envio);
-            }}
+            onClick={() => onSelect(envio)}
             style={{
                 padding: '12px',
                 borderBottom: '1px solid #e5e7eb',
@@ -482,22 +434,6 @@ const EnvioPendienteItem = memo(({ envio, onSelect, aeropuertos = [], vuelosMap,
 
 EnvioPendienteItem.displayName = 'EnvioPendienteItem';
 
-function parseMysqlLocalWithOffset(localStr, offsetHours) {
-  if (!localStr && localStr !== 0) return null;
-  const t = String(localStr).trim();
-
-  // soporta: "2025-12-19 22:08:00" o "2025-12-19 22:08:00.000000"
-  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return null;
-
-  const [, y, mo, d, hh, mm, ss = "0"] = m;
-  const off = Number(offsetHours || 0);
-
-  // UTC = local - off
-  const utcMs = Date.UTC(+y, +mo - 1, +d, +hh - off, +mm, +ss);
-  return new Date(utcMs);
-}
-
 export default function PanelCatalogos({
     isOpen,
     onClose,
@@ -550,36 +486,29 @@ export default function PanelCatalogos({
 
     function sanitizeRutas(lista, currentMs) {
         if (!Array.isArray(lista)) return [];
-
-        const BUFFER_MS = 2 * 60 * 1000; // opcional: 2 min
-
         return lista.filter(envio => {
-            const info = envio?.vuelosInfo;
-            if (!Array.isArray(info) || info.length === 0) return true;
+            if (!Array.isArray(envio.vuelosInfo) || envio.vuelosInfo.length === 0) return true;
 
-            let maxArrival = null;
-
-            for (const v of info) {
+            // Encontrar la hora de llegada final (último vuelo)
+            let maxArrival = 0;
+            for (const v of envio.vuelosInfo) {
                 const raw = v.horaLlegada || v.horaDestino || v.horaFin;
-                const d =
-                    parsePlanificadorTime(raw) ||
-                    parseBackendTime(raw) ||
-                    (raw ? new Date(raw) : null);
-
+                const d = parsePlanificadorTime(raw) || parseBackendTime(raw) || (raw ? new Date(raw) : null);
                 if (!d || isNaN(d.getTime())) continue;
-
-                const ms = d.getTime();
-                if (maxArrival == null || ms > maxArrival) maxArrival = ms;
+                const hasOffset = /\(UTC[+\-]\d{2}:\d{2}\)/.test(String(raw));
+                const SIM_OFFSET_MINUTES = -5 * 60;
+                const arrivalMs = hasOffset ? (d.getTime() + SIM_OFFSET_MINUTES * 60 * 1000) : d.getTime();
+                if (arrivalMs > maxArrival) maxArrival = arrivalMs;
             }
 
-            if (maxArrival == null) return true;
+            // Si no hay hora de llegada válida, mantener el envío
+            if (maxArrival === 0) return true;
 
-            // Mantener visible hasta que pase la llegada final (+ buffer)
-            return currentMs <= (maxArrival + BUFFER_MS);
+            // Mostrar el envío hasta que pase su hora de llegada final
+            // (currentMs <= maxArrival significa que aún no ha llegado o está llegando)
+            return currentMs <= maxArrival;
         });
     }
-
-
 
     // ⚡ OPTIMIZACIÓN: Cache de datos para evitar recálculos
     const datosCache = useRef({ aeropuertos: [], vuelos: [], lastFetch: 0 });
@@ -641,9 +570,6 @@ export default function PanelCatalogos({
                             parteAsignadas: partes
                         };
                     });
-                    console.log("🕒 SIM now:", new Date(simTimeRef.current).toString(), simTimeRef.current);
-                    console.log("📦 enviosProcesados sample:", enviosProcesados?.[0]);
-                    console.log("✈️ sample vuelosInfo:", enviosProcesados?.[0]?.vuelosInfo?.[0]);
 
                     const sanitized = sanitizeRutas(enviosProcesados, simTimeRef.current);
                     // Ordenar por fecha de entrada (ascendente: las más antiguas primero)
@@ -718,9 +644,8 @@ export default function PanelCatalogos({
         const BUFFER_MS = 2 * 60 * 1000; // 2 minutos extra tras llegada
         for (const v of vuelosData || []) {
             // filtrar por ventana temporal del vuelo
-            const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
-            const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
-
+            const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
+            const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
             if (!hIni || !hFin) continue;
             const ini = hIni.getTime();
             const fin = hFin.getTime();
@@ -879,45 +804,32 @@ export default function PanelCatalogos({
 
     // ⚡ OPTIMIZACIÓN: Memoizar filtrado de vuelos activos
     const vuelosActivos = useMemo(() => {
-        const BUFFER_MS = 2 * 60 * 1000; // 2 min
-
-        const activos = (vuelos || []).filter((v) => {
-            const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
-            const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
-
+        const activos = vuelos.filter(v => {
+            const hIni = parsePlanificadorTime(v.horaSalida) || parseBackendTime(v.horaOrigen);
+            const hFin = parsePlanificadorTime(v.horaLlegada) || parseBackendTime(v.horaDestino);
             if (!hIni || !hFin) return false;
-
             const ini = hIni.getTime();
             const fin = hFin.getTime();
-
-            return nowMs >= ini && nowMs < fin + BUFFER_MS;
+            return nowMs >= ini && nowMs < fin;
         });
-        if ((vuelos || []).length) {
-            const v0 = (vuelos || [])[0];
-            console.log("DEBUG vuelo[0] horas:", v0.horaSalida, v0.horaLlegada);
-            console.log("DEBUG parse:", parsePlanificadorTime(v0.horaSalida), parsePlanificadorTime(v0.horaLlegada));
-        }
 
         if (!busquedaVuelo.trim()) return activos;
 
         const termino = busquedaVuelo.toLowerCase().trim();
-        return activos.filter((v) => {
-            const id = String(v.id || v.idTramo || "");
-            const origenCiudad = (v.origen?.ciudad || "").toLowerCase();
-            const origenCodigo = (v.origen?.codigo || "").toLowerCase();
-            const destinoCiudad = (v.destino?.ciudad || "").toLowerCase();
-            const destinoCodigo = (v.destino?.codigo || "").toLowerCase();
+        return activos.filter(v => {
+            const id = String(v.id || v.idTramo || '');
+            const origenCiudad = (v.origen?.ciudad || '').toLowerCase();
+            const origenCodigo = (v.origen?.codigo || '').toLowerCase();
+            const destinoCiudad = (v.destino?.ciudad || '').toLowerCase();
+            const destinoCodigo = (v.destino?.codigo || '').toLowerCase();
 
-            return (
-                id.includes(termino) ||
+            return id.includes(termino) ||
                 origenCiudad.includes(termino) ||
                 origenCodigo.includes(termino) ||
                 destinoCiudad.includes(termino) ||
-                destinoCodigo.includes(termino)
-            );
+                destinoCodigo.includes(termino);
         });
     }, [vuelos, nowMs, busquedaVuelo]);
-
 
     // 🔍 Búsqueda en backend con debounce para envíos por ID
     useEffect(() => {

@@ -1,4 +1,4 @@
-// src/app/lib/useSimulacionDiaStore.js
+/* // src/app/lib/useSimulacionDiaStore.js
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -31,7 +31,7 @@ export function useSimulacionDiaStore() {
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
-      debug: () => { },
+      debug: () => {},
     });
 
     client.onConnect = () => {
@@ -70,3 +70,4 @@ export function useSimulacionDiaStore() {
 
   return simState;
 }
+ */

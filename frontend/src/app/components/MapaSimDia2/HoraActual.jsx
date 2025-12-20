@@ -31,37 +31,32 @@ export default function HoraActual({
   const now = new Date(nowMs || Date.now());
   const localeToUse =
     locale || (typeof navigator !== "undefined" ? navigator.language : "es-PE");
-
-  // ✅ Hora y fecha forzadas a Lima (aunque tu PC tenga otra zona)
-  const timeStr = new Intl.DateTimeFormat(localeToUse, {
-    timeZone: "America/Lima",
+  const timeStr = now.toLocaleTimeString(localeToUse, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  }).format(now);
-
-  const dateStr = new Intl.DateTimeFormat(localeToUse, {
-    timeZone: "America/Lima",
+  });
+  const dateStr = now.toLocaleDateString(localeToUse, {
     weekday: "short",
     day: "2-digit",
     month: "short",
     year: "numeric",
-  }).format(now);
+  });
 
-  // ✅ Lima fijo
-  const tzStr = "UTC-05:00";
+  const tzOffsetMin = -now.getTimezoneOffset();
+  const tzSign = tzOffsetMin >= 0 ? "+" : "-";
+  const tzHours = Math.floor(Math.abs(tzOffsetMin) / 60);
+  const tzMins = Math.abs(tzOffsetMin) % 60;
+  const tzStr = `UTC${tzSign}${String(tzHours).padStart(2, "0")}:${String(
+    tzMins
+  ).padStart(2, "0")}`;
 
-  // ✅ UTC real
-  const utcStr = new Intl.DateTimeFormat(localeToUse, {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(now);
-
+  const utcStr = new Date(
+    now.getTime() + now.getTimezoneOffset() * 60000
+  )
+    .toISOString()
+    .replace("T", " ")
+    .split(".")[0];
 
   const baseStyle = {
     position: "relative",

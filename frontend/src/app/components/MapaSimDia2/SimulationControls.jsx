@@ -11,13 +11,9 @@ const API_BASE =
     "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 const ENVIO_GET_URL = (fecha) => `${API_BASE}/api/envios/obtenerTodosFecha/${fecha}`;
-const CLEAR_MAP_URL = `${API_BASE}/api/planificador/limpiar-planificacion`;
+const CLEAR_MAP_URL = `${API_BASE}/api/planificador/limpiar-simulacion-dia`;
 const INICIAR_OPS_DIARIAS_URL = `${API_BASE}/api/planificador/iniciar-operaciones-diarias`;
-const REINICIAR_OPS_DIARIAS_URL = `${API_BASE}/api/planificador/reiniciar-simulacion-dia`;
-const RESET_RELOJ_URL = `${API_BASE}/api/simulacion-dia/reloj/reset`;
-const ENVIO_LECTURA_ARCHIVO_URL = `${API_BASE}/api/envios/lecturaArchivo`;
-const ENVIO_ESTADOS_URL = `${API_BASE}/api/envios/conteo-por-estado`;
-const DETENER_URL = `${API_BASE}/api/planificador/detener`;
+const RESET_RELOJ_URL = `${API_BASE}/api/simulacion-dia/reloj/reset`; // ⏱️ nuevo endpoint
 
 function msToDatetimeLocal(ms) {
     const d = new Date(ms);
@@ -62,7 +58,7 @@ function toUtcIsoWithoutZ(localDatetimeStr) {
 
 export default function SimulationControlsDia({ startStr = null, airports = [] }) {
     const [simMs, setSimMsState] = useState(() => getSimMs() || Date.now());
-    const [fechaInicio, setFechaInicio] = useState(() => msToDatetimeLocal(getSimMs() || Date.now()));
+    const [inputDt, setInputDt] = useState(() => msToDatetimeLocal(getSimMs() || Date.now()));
 
     const [showAdd, setShowAdd] = useState(false);
     const [form, setForm] = useState({
@@ -74,162 +70,15 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
         cliente: "",
     });
 
-    const ESTADOS_DEFAULT = {
-        PLANIFICADO: 0,
-        EN_RUTA: 0,
-        FINALIZADO: 0,
-        ENTREGADO: 0,
-        NULL: 0,
-    };
-
-    const [estadoCounts, setEstadoCounts] = useState(() => ({
-        ...ESTADOS_DEFAULT,
-        total: 0,
-    }));
-
     const [counts, setCounts] = useState({ total: 0, inTransit: 0, waiting: 0 });
     const [enviosCache, setEnviosCache] = useState([]);
+    const simStartRef = useRef(getSimMs() || null);
 
     // 🔒 overlay de bloqueo mientras se limpia el mapa (sincronizado vía STOMP)
     const [isClearing, setIsClearing] = useState(false);
 
     // 🎹 qué teclado está activo: "numProductos" | "cliente" | null
     const [activeKeypad, setActiveKeypad] = useState(null);
-
-    const fileInputRef = useRef(null);
-    const [isUploadingFile, setIsUploadingFile] = useState(false);
-
-
-    async function refreshEstadoCounts() {
-        try {
-            const r = await fetch(ENVIO_ESTADOS_URL);
-            if (!r.ok) throw new Error("conteo-por-estado " + r.status);
-
-            const data = await r.json().catch(() => ({}));
-            if (data?.estado !== "éxito") throw new Error(data?.mensaje || "respuesta inválida");
-
-            const conteos = data?.conteos || {};
-            const merged = { ...ESTADOS_DEFAULT, ...conteos };
-
-            const total =
-                typeof data?.totalEnvios === "number"
-                    ? data.totalEnvios
-                    : Object.values(merged).reduce((a, b) => a + Number(b || 0), 0);
-
-            setEstadoCounts({ ...merged, total });
-        } catch (err) {
-            console.error("[conteo-por-estado] error:", err);
-            setEstadoCounts({ ...ESTADOS_DEFAULT, total: 0 });
-        }
-    }
-
-    useEffect(() => {
-        let mounted = true;
-
-        const run = async () => {
-            if (!mounted) return;
-            await refreshEstadoCounts();
-        };
-
-        run();
-        const iv = setInterval(run, 1_000);
-
-        const onIniciado = () => run();
-        window.addEventListener("planificador:iniciado", onIniciado);
-
-        return () => {
-            mounted = false;
-            clearInterval(iv);
-            window.removeEventListener("planificador:iniciado", onIniciado);
-        };
-    }, []);
-
-
-    async function uploadArchivoEnvios(file) {
-        if (!file) return;
-
-        setIsUploadingFile(true);
-        try {
-            const fd = new FormData();
-            fd.append("arch", file); // 👈 IMPORTANTE: "arch" como en @RequestParam("arch")
-
-            const resp = await fetch(ENVIO_LECTURA_ARCHIVO_URL, {
-                method: "POST",
-                body: fd,
-            });
-
-            if (!resp.ok) {
-                const txt = await resp.text().catch(() => null);
-                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
-            }
-
-            const data = await resp.json().catch(() => ({}));
-            console.log("[lecturaArchivo] respuesta:", data);
-
-            alert(
-                `✅ Archivo cargado.\n` +
-                `Envios cargados: ${data.enviosCargados ?? "n/d"}\n` +
-                `Errores: ${data.errores ?? "n/d"}\n` +
-                `Tiempo(s): ${data.tiempoEjecucionSegundos ?? "n/d"}`
-            );
-        } catch (err) {
-            console.error("[lecturaArchivo] error:", err);
-            alert("❌ Error cargando archivo: " + (err.message || err));
-        } finally {
-            setIsUploadingFile(false);
-            if (fileInputRef.current) fileInputRef.current.value = ""; // para permitir re-subir el mismo archivo
-        }
-    }
-
-    const iniciar = async () => {
-        if (!fechaInicio) {
-            alert("Por favor ingresa una fecha de inicio.");
-            return;
-        }
-        console.log(`🚀 [FRONTEND] Iniciando simulación a las ${new Date().toLocaleTimeString()}`);
-        try {
-            // Pequeña pausa para asegurar que la BD se sincronice
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Parsear fecha como hora local
-            const [datePart, timePart] = fechaInicio.split('T');
-            const [year, month, day] = datePart.split('-').map(Number);
-            const [hour, minute] = (timePart || '00:00').split(':').map(Number);
-
-            const inicio = new Date(year, month - 1, day, hour, minute);
-            // Compensar la diferencia horaria (-05:00) agregando 5 horas para que
-            // la "Fecha / Hora simulada" coincida con la ingresada por el usuario.
-            // El usuario ingresa hora local, pero el motor interno interpreta en UTC.
-            // Ajustamos aquí para alinear la visualización posterior.
-            inicio.setHours(inicio.getHours());
-
-            // Formatear para el backend en formato ISO con T (YYYY-MM-DDTHH:mm:ss)
-            const formatoBackend = (d) => {
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                const h = String(d.getHours()).padStart(2, '0');
-                const min = String(d.getMinutes()).padStart(2, '0');
-                const sec = String(d.getSeconds()).padStart(2, '0');
-                return `${y}-${m}-${day}T${h}:${min}:${sec}`;
-            };
-
-            const body = {
-                fechaInicio: formatoBackend(inicio),
-            };
-
-            await fetch(`${API_BASE}/api/planificador/reiniciar-simulacion-dia`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body)
-            });
-
-            // Notificar al mapa para que refresque inmediatamente los vuelos (evitar esperar el polling)
-            try { window.dispatchEvent(new Event('planificador:iniciado')); } catch { }
-
-        } finally {
-        }
-    };
 
     useEffect(() => {
         computeCounts(enviosCache, simMs);
@@ -298,8 +147,10 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
         setCounts({ total, inTransit, waiting });
     }
 
+
+    // ⏱️ Botón "Iniciar": reinicia el reloj de simulación día a día en el backend
     const onApplyInput = async () => {
-        const isoUtc = toUtcIsoWithoutZ(fechaInicio);
+        const isoUtc = toUtcIsoWithoutZ(inputDt);
         if (!isoUtc) {
             alert("Fecha/hora inválida.");
             return;
@@ -327,29 +178,8 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
             if (typeof data.simMs === "number") {
                 setSimMs(data.simMs);
                 setSimMsState(data.simMs);
-                setFechaInicio(msToDatetimeLocal(data.simMs));
+                setInputDt(msToDatetimeLocal(data.simMs));
             }
-
-            /* const resp2 = await fetch(DETENER_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-            });
-
-            if (!resp2.ok) {
-                const txt = await resp.text().catch(() => null);
-                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
-            }
-
-            const resp3 = await fetch(REINICIAR_OPS_DIARIAS_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ fechaInicio: isoUtc }),
-            });
-
-            if (!resp3.ok) {
-                const txt = await resp.text().catch(() => null);
-                throw new Error("HTTP " + resp.status + (txt ? " - " + txt : ""));
-            } */
 
             if (typeof window !== "undefined") {
                 try {
@@ -522,15 +352,9 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
     // 🔔 Hook STOMP: control de limpieza + reloj de simulación día a día
     useEffect(() => {
-        // Primero verificar variable específica de WebSocket, luego variable general, luego fallback
-        const baseUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL
-            || process.env.NEXT_PUBLIC_BACKEND_URL
-            || "https://1inf54-981-5e.inf.pucp.edu.pe";
-
-        // Formar la cadena completa del endpoint
-        const wsUrl = baseUrl.includes('/ws-planificacion')
-            ? baseUrl
-            : `${baseUrl}/ws-planificacion`;
+        const wsUrl =
+            process.env.NEXT_PUBLIC_BACKEND_WS_URL ||
+            "https://1inf54-981-5e.inf.pucp.edu.pe/ws-planificacion";
 
         const socket = new SockJS(wsUrl);
         const client = new Client({
@@ -548,6 +372,9 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                         setIsClearing(true);
                     } else if (body.tipo === "clear_map_end") {
                         setIsClearing(false);
+                        if (typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("simulacion:limpiada"));
+                        }
                     }
                     if (body.tipo === "resumen_envios_dia") {
                         setCounts({
@@ -614,6 +441,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
 
             if (typeof window !== "undefined") {
                 try {
+                    window.dispatchEvent(new Event("simulacion:limpiada"));
                     window.dispatchEvent(new Event("planificador:iniciado"));
                 } catch {
                     // no-op
@@ -742,29 +570,22 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                 </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                    <div style={{ marginLeft: 6, fontSize: 12, opacity: 0.7 }}>
-                        Total Envíos: <b>{estadoCounts.total ?? 0}</b>
+                    <div style={{ fontSize: 13 }}>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>Total</div>
+                        <div style={{ fontWeight: 700 }}>{counts.total}</div>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, auto)", gap: "4px 14px" }}>
-                        {[
-
-                            { k: "PLANIFICADO", label: "Planificado" },
-                            { k: "EN_RUTA", label: "En ruta" },
-                            { k: "FINALIZADO", label: "Finalizado" },
-                            { k: "NULL", label: "Sin estado" },
-                        ].map(({ k, label }) => (
-                            <div
-                                key={k}
-                                style={{ marginLeft: 6, fontSize: 12, opacity: 0.7, whiteSpace: "nowrap" }}
-                                title={k}
-                            >
-                                {label}: <b style={{ opacity: 1 }}>{estadoCounts?.[k] ?? 0}</b>
-                            </div>
-                        ))}
+                    <div style={{ fontSize: 13 }}>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>Planificados</div>
+                        <div style={{ fontWeight: 700, color: "#f59e0b" }}>
+                            {counts.inTransit}
+                        </div>
                     </div>
-
-
-
+                    <div style={{ fontSize: 13 }}>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}><span style={{ whiteSpace: "nowrap" }}>En espera</span></div>
+                        <div style={{ fontWeight: 700, color: "#64748b" }}>
+                            {counts.waiting}
+                        </div>
+                    </div>
                 </div>
 
                 <div
@@ -781,8 +602,8 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                         <label style={{ fontSize: 12, opacity: 0.85 }}>Fecha / Hora</label>
                         <input
                             type="datetime-local"
-                            value={fechaInicio}
-                            onChange={(e) => setFechaInicio(e.target.value)}
+                            value={inputDt}
+                            onChange={(e) => setInputDt(e.target.value)}
                             style={{
                                 padding: "6px 8px",
                                 borderRadius: 6,
@@ -1109,74 +930,35 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
                             <div
                                 style={{
                                     display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between", // 👈 separa izquierda vs derecha
                                     gap: 8,
+                                    justifyContent: "flex-end",
                                     marginTop: 10,
-                                    width: "100%",
                                 }}
                             >
-                                {/* input hidden para elegir archivo */}
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".txt"
-                                    style={{ display: "none" }}
-                                    onChange={(e) => {
-                                        const f = e.target.files?.[0];
-                                        if (f) uploadArchivoEnvios(f);
+                                <button
+                                    type="button"
+                                    className="btn-outline"
+                                    onClick={() => {
+                                        setShowAdd(false);
+                                        setActiveKeypad(null);
                                     }}
-                                />
-
-                                {/* ✅ IZQUIERDA: Cargar archivo */}
-                                <div style={{ display: "flex", gap: 8 }}>
-                                    <button
-                                        type="button"
-                                        className="btn-primary"
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={isClearing || isUploadingFile}
-                                        style={{
-                                            padding: "6px 12px",
-                                            opacity: (isClearing || isUploadingFile) ? 0.7 : 1,
-                                            cursor: (isClearing || isUploadingFile) ? "not-allowed" : "pointer",
-                                        }}
-                                    >
-                                        {isUploadingFile ? "Cargando..." : "Cargar archivo"}
-                                    </button>
-                                </div>
-
-                                {/* ✅ DERECHA: Cancelar + Crear envío */}
-                                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                                    <button
-                                        type="button"
-                                        className="btn-outline"
-                                        onClick={() => {
-                                            setShowAdd(false);
-                                            setActiveKeypad(null);
-                                        }}
-                                        style={{ padding: "6px 12px" }}
-                                        disabled={isClearing || isUploadingFile}
-                                    >
-                                        Cancelar
-                                    </button>
-
-                                    <button
-                                        type="submit"
-                                        className="btn-accent"
-                                        style={{
-                                            padding: "6px 12px",
-                                            background: "#22c55e",
-                                            color: "#fff",
-                                            borderRadius: 6,
-                                        }}
-                                        disabled={isClearing || isUploadingFile}
-                                    >
-                                        Crear envío
-                                    </button>
-                                </div>
+                                    style={{ padding: "6px 12px" }}
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="btn-accent"
+                                    style={{
+                                        padding: "6px 12px",
+                                        background: "#22c55e",
+                                        color: "#fff",
+                                        borderRadius: 6,
+                                    }}
+                                >
+                                    Crear envío
+                                </button>
                             </div>
-
-
                         </div>
                     </form>
                 ) : null}
