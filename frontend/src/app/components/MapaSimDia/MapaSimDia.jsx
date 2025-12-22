@@ -12,9 +12,58 @@ import SimulationControlsDia from "./SimulationControls";
 import PanelCatalogos from "./PanelCatalogos";
 import PanelVueloDetalle from "./PanelVueloDetalle";
 import PanelAeropuertoDetalle from "./PanelAeropuertoDetalle";
+import ModalResumen from "../Mapa/ModalResumen";
+import useWebSocket from "../../../lib/useWebSocket";
 
 // URL base del backend (misma usada en SimulationControls)
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
+
+/**
+ * Calcula la duración de la simulación en formato legible
+ * @param {string|null} fechaInicio - Fecha de inicio ISO
+ * @param {string|null} fechaFin - Fecha de fin ISO
+ * @param {number|null} cicloActual - Número de ciclos completados
+ * @returns {string} Duración formateada (ej: "5 días 3 horas" o "12 horas 30 min")
+ */
+function calcularDuracionSimulacion(fechaInicio, fechaFin, cicloActual) {
+  // Intentar calcular con fechas
+  if (fechaInicio && fechaFin) {
+    try {
+      const inicio = new Date(fechaInicio);
+      const fin = new Date(fechaFin);
+      if (!isNaN(inicio.getTime()) && !isNaN(fin.getTime())) {
+        const diffMs = fin.getTime() - inicio.getTime();
+        if (diffMs >= 0) {
+          const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const minutos = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+          const segundos = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+          if (dias > 0) {
+            return `${dias} día${dias !== 1 ? 's' : ''} ${horas} hora${horas !== 1 ? 's' : ''}`;
+          } else if (horas > 0) {
+            return `${horas} hora${horas !== 1 ? 's' : ''} ${minutos} min`;
+          } else if (minutos > 0) {
+            return `${minutos} minuto${minutos !== 1 ? 's' : ''}`;
+          } else if (segundos > 0) {
+            return `${segundos} segundo${segundos !== 1 ? 's' : ''}`;
+          } else {
+            return '0min';
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error parseando fechas de simulación:', e);
+    }
+  }
+
+  // Fallback a ciclos
+  if (cicloActual && cicloActual > 0) {
+    return `${cicloActual} ciclo${cicloActual !== 1 ? 's' : ''}`;
+  }
+
+  return 'N/A';
+}
 
 // ⚡ OPTIMIZACIÓN: Usar Canvas renderer para mejor performance con muchos elementos
 const canvasRenderer = L.canvas({ padding: 0.5, tolerance: 10 });
@@ -335,6 +384,175 @@ export default function MapaSimDiaria() {
   const [aeropuertoDetalle, setAeropuertoDetalle] = useState(null);
   const [flyTarget, setFlyTarget] = useState(null);
   const [controlesAbiertos, setControlesAbiertos] = useState(true);
+
+  // Estados para el modal de resumen
+  const [mostrarModalResumen, setMostrarModalResumen] = useState(false);
+  const [datosResumen, setDatosResumenRaw] = useState(null);
+  const [esSimulacionDetenida, setEsSimulacionDetenida] = useState(false);
+  // Estado para el tiempo real transcurrido
+  const [realElapsed, setRealElapsed] = useState(0);
+  // Valor congelado de realElapsed al detener la simulación
+  const realElapsedCongeladoRef = useRef(null);
+  // Congelar el resumen mostrado cuando la simulación está detenida y el modal está abierto
+  const resumenCongeladoRef = useRef(null);
+
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && datosResumen) {
+      resumenCongeladoRef.current = datosResumen;
+    }
+    // Si se cierra el modal, limpiar el resumen congelado
+    if (!mostrarModalResumen) {
+      resumenCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, datosResumen]);
+
+  // Si la simulación está detenida y el modal está abierto, siempre mostrar el resumen congelado
+  const datosResumenFinal = (mostrarModalResumen && esSimulacionDetenida && resumenCongeladoRef.current)
+    ? resumenCongeladoRef.current
+    : datosResumen;
+
+  // Congelar el valor de realElapsed cuando se detiene la simulación y se muestra el resumen
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && realElapsed != null) {
+      if (realElapsedCongeladoRef.current == null) {
+        realElapsedCongeladoRef.current = realElapsed;
+      }
+    }
+    if (!mostrarModalResumen) {
+      realElapsedCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, realElapsed]);
+
+  // Manejar simNow (fecha/hora simulada) congelada al detener
+  const [simNow, setSimNow] = useState(() => getSimMs() ? new Date(getSimMs()) : null);
+  const simNowCongeladoRef = useRef(null);
+  useEffect(() => {
+    const unsub = subscribe(ms => setSimNow(new Date(ms)));
+    return () => unsub();
+  }, []);
+  useEffect(() => {
+    if (mostrarModalResumen && esSimulacionDetenida && simNow) {
+      if (simNowCongeladoRef.current == null) {
+        simNowCongeladoRef.current = simNow;
+      }
+    }
+    if (!mostrarModalResumen) {
+      simNowCongeladoRef.current = null;
+    }
+  }, [mostrarModalResumen, esSimulacionDetenida, simNow]);
+  const simNowFinal = (mostrarModalResumen && esSimulacionDetenida && simNowCongeladoRef.current)
+    ? simNowCongeladoRef.current
+    : simNow;
+
+  // Usar el valor congelado si corresponde
+  const realElapsedFinal = (mostrarModalResumen && esSimulacionDetenida && realElapsedCongeladoRef.current != null)
+    ? realElapsedCongeladoRef.current
+    : realElapsed;
+
+  // 🛑 Listener para detención inmediata de simulación
+  // Solo obtener y mostrar el resumen UNA VEZ cuando el planificador se detiene
+  useEffect(() => {
+    let resumenMostrado = false;
+    const handleDetener = async (event) => {
+      if (resumenMostrado || mostrarModalResumen) return;
+      resumenMostrado = true;
+      console.log('🛑 Evento de detención recibido');
+
+      // Capturar la hora actual (simNow) ANTES de mostrar el modal para usarla como fechaFin
+      const simNowActual = getSimMs() ? new Date(getSimMs()) : null;
+
+      // Limpiar inmediatamente los vuelos
+      setVuelosCache([]);
+      setRawVuelos([]);
+
+      // Usar resumen del evento si está disponible
+      let data = event?.detail?.resumen || null;
+      if (!data) {
+        try {
+          const resumenRes = await fetch(`${API_BASE}/api/planificador/resumen-planificacion`);
+          if (resumenRes.ok) {
+            data = await resumenRes.json();
+          }
+        } catch (error) {
+          console.error('❌ Error al obtener resumen al detener:', error);
+        }
+      }
+
+      if (data) {
+        // Transformar datos del backend al formato que espera el modal
+        const statsPedidos = data.estadisticasPedidos || {};
+        const infoGeneral = data.informacionGeneral || {};
+
+        // Usar la hora actual congelada (simNow) como fechaFin
+        // Convertir simNow a ISO string si está disponible, sino usar null
+        const fechaFinSimNow = simNowActual ? simNowActual.toISOString() : null;
+        // Usar fechaInicioSimRef si está disponible (fecha cuando se cargó el primer envío),
+        // sino usar infoGeneral.fechaInicio o horizonte?.inicio como fallback
+        const fechaInicio = fechaInicioSimRef.current
+          ? new Date(fechaInicioSimRef.current).toISOString()
+          : (infoGeneral.fechaInicio || horizonte?.inicio || null);
+
+        // Preparar solo los datos requeridos para el resumen semanal
+        const resumenFormateado = {
+          fechaInicio: fechaInicio,
+          fechaFin: fechaFinSimNow, // Usar simNow como fechaFin
+          duracionSimulacion: calcularDuracionSimulacion(
+            fechaInicio,
+            fechaFinSimNow, // Calcular duración usando simNow
+            infoGeneral.cicloActual
+          ),
+          totalCiclosCompletados: infoGeneral.totalCiclosCompletados ?? infoGeneral.cicloActual ?? null,
+          pedidosCompletados: statsPedidos.pedidosCompletados ?? statsPedidos.totalPedidos ?? null,
+          totalPedidos: statsPedidos.totalPedidos ?? null,
+        };
+
+        setDatosResumenRaw(resumenFormateado);
+        setEsSimulacionDetenida(true);
+        setMostrarModalResumen(true);
+      } else {
+        // Si no hay data del backend, usar simNow como fechaFin también
+        const fechaFinSimNow = simNowActual ? simNowActual.toISOString() : null;
+        // Usar fechaInicioSimRef si está disponible (fecha cuando se cargó el primer envío),
+        // sino usar horizonte?.inicio como fallback
+        const fechaInicio = fechaInicioSimRef.current
+          ? new Date(fechaInicioSimRef.current).toISOString()
+          : (horizonte?.inicio || null);
+
+        setDatosResumenRaw({
+          fechaInicio: fechaInicio,
+          fechaFin: fechaFinSimNow,
+          totalEnvios: 0,
+          enviosEntregados: 0,
+          enviosEnTransito: 0,
+          enviosPendientes: 0,
+          porcentajeCompletado: 0,
+          duracionSimulacion: calcularDuracionSimulacion(fechaInicio, fechaFinSimNow, null)
+        });
+        setEsSimulacionDetenida(true);
+        setMostrarModalResumen(true);
+      }
+    };
+
+    window.addEventListener('planificador:detenido', handleDetener);
+    return () => window.removeEventListener('planificador:detenido', handleDetener);
+  }, [mostrarModalResumen]);
+
+  // 🔌 WebSocket: Actualizaciones en tiempo real del planificador (manteniendo polling como fallback)
+  const { connected: wsConnected, error: wsError, usingSockJS } = useWebSocket({
+    topic: '/topic/planificacion',
+    enabled: true,
+    onMessage: useCallback((message) => {
+      // 📢 Manejar estado del planificador (cuando backend detiene simulación)
+      if (message?.tipo === 'estado_planificador') {
+        console.log('📢 Estado planificador recibido:', message);
+        if (message.activo === false) {
+          console.log('🛑 Backend detuvo la simulación - despachando evento planificador:detenido');
+          window.dispatchEvent(new CustomEvent('planificador:detenido', { detail: message }));
+        }
+        return;
+      }
+    }, [])
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -1062,7 +1280,7 @@ export default function MapaSimDiaria() {
           pointerEvents: "auto",
         }}
       >
-        <HoraActual style={{ position: "relative" }} />
+        <HoraActual style={{ position: "relative" }} onRealElapsed={setRealElapsed} />
 
         {controlesAbiertos ? (
           <div style={{ position: "relative" }}>
@@ -1396,6 +1614,17 @@ export default function MapaSimDiaria() {
           />
         )}
       </MapContainer>
+
+      {/* Modal de resumen de simulación */}
+      <ModalResumen
+        isOpen={mostrarModalResumen}
+        onClose={() => setMostrarModalResumen(false)}
+        resumen={datosResumenFinal}
+        esDetenida={esSimulacionDetenida}
+        realElapsed={realElapsedFinal}
+        simNow={simNowFinal}
+        fechaInicio={datosResumenFinal?.fechaInicio || horizonte?.inicio || null}
+      />
     </div>
   );
 }

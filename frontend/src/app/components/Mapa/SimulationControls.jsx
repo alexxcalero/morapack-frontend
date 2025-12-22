@@ -131,7 +131,7 @@ export default function SimulationControls({ startStr = null, onFechaInicioChang
             // la "Fecha / Hora simulada" coincida con la ingresada por el usuario.
             // El usuario ingresa hora local, pero el motor interno interpreta en UTC.
             // Ajustamos aquí para alinear la visualización posterior.
-            inicio.setHours(inicio.getHours());
+            inicio.setHours(inicio.getHours() + 5);
             const fin = new Date(inicio);
             fin.setDate(fin.getDate() + 7);
 
