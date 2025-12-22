@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 
 // URL base del backend (configurable por env NEXT_PUBLIC_BACKEND_URL)
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "https://1inf54-981-5e.inf.pucp.edu.pe";
 
 export default function SimulationControls({ startStr = null, onFechaInicioChange }) {
     const [estado, setEstado] = useState({ activo: false, cargando: false });
