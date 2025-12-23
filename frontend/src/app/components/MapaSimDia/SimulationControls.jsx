@@ -132,7 +132,7 @@ export default function SimulationControlsDia({ startStr = null, airports = [] }
         };
 
         run();
-        const iv = setInterval(run, 1_000);
+        const iv = setInterval(run, 3_000);
 
         const onIniciado = () => run();
         window.addEventListener("planificador:iniciado", onIniciado);
