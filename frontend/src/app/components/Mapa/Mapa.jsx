@@ -602,44 +602,93 @@ export default function Mapa() {
         // 🔄 Incrementar contador de ciclos para que el catálogo refresque
         setCicloActual(prev => prev + 1);
 
-        // Refrescar de inmediato las capacidades de los aeropuertos usando el nuevo endpoint
+        // Refrescar de inmediato los datos del último ciclo
         (async () => {
           try {
-            console.log('🌐 Realizando fetch a /api/aeropuertos/obtenerCapacidades');
-            const res = await fetch(`${API_BASE}/api/aeropuertos/obtenerCapacidades`);
+            console.log('🌐 Realizando fetch a /api/planificador/vuelos-ultimo-ciclo');
+            const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
             if (!res.ok) {
-              console.warn('❌ Fetch a /api/aeropuertos/obtenerCapacidades falló:', res.status);
+              console.warn('❌ Fetch a /api/planificador/vuelos-ultimo-ciclo falló:', res.status);
               return;
             }
             const data = await res.json();
-            // Actualizar capacidades locales igual que antes
+            setHorizonte(data?.horizonte || null);
+            const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
             if (Array.isArray(data?.aeropuertos)) {
               console.log('🛰️ Aeropuertos recibidos del backend:', data.aeropuertos);
               setDynamicAirports(data.aeropuertos);
+              // Aplicar solo DECREMENTOS del planificador (envíos entregados)
               setLocalAirportCapacities(prevLocal => {
                 const newLocal = { ...prevLocal };
                 data.aeropuertos.forEach(aeropuerto => {
                   const id = aeropuerto.id ?? aeropuerto.idAeropuerto;
                   if (id != null) {
-                    const capacidadOcupada = aeropuerto.capacidadOcupada ?? 0;
-                    const capacidadActual = prevLocal[id] ?? capacidadOcupada;
+                    const capacidadPlanificador = aeropuerto.capacidadOcupada ?? 0;
+                    const capacidadActual = prevLocal[id] ?? capacidadPlanificador;
                     // Log de depuración
-                    console.log(`Aeropuerto ${id}: capacidadOcupada=${capacidadOcupada}, capacidadActual=${capacidadActual}, prevLocal=`, prevLocal);
-                    // Solo aplicar si el backend reporta MENOS capacidad (entrega)
-                    if (capacidadOcupada < capacidadActual) {
-                      console.log(`→ Decremento detectado. Actualizando localAirportCapacities[${id}] de ${capacidadActual} a ${capacidadOcupada}`);
-                      newLocal[id] = capacidadOcupada;
+                    console.log(`Aeropuerto ${id}: capacidadPlanificador=${capacidadPlanificador}, capacidadActual=${capacidadActual}, prevLocal=`, prevLocal);
+                    // Solo aplicar si el planificador reporta MENOS capacidad (entrega)
+                    if (capacidadPlanificador < capacidadActual) {
+                      console.log(`→ Decremento detectado. Actualizando localAirportCapacities[${id}] de ${capacidadActual} a ${capacidadPlanificador}`);
+                      newLocal[id] = capacidadPlanificador;
                     }
-                    // Si no existe en prevLocal, inicializar con valor del backend
+                    // Si no existe en prevLocal, inicializar con valor del planificador
                     if (!(id in prevLocal)) {
-                      console.log(`→ Inicializando localAirportCapacities[${id}] a ${capacidadOcupada}`);
-                      newLocal[id] = capacidadOcupada;
+                      console.log(`→ Inicializando localAirportCapacities[${id}] a ${capacidadPlanificador}`);
+                      newLocal[id] = capacidadPlanificador;
                     }
                   }
                 });
                 return newLocal;
               });
             }
+            setVuelosCache(prev => {
+
+              // Preferir vuelos inyectados (__deRutaEnvio) sobre los que llegan del planificador
+              const ahoraSimulacion = getSimMs();
+              const margenSeguridad = 5 * 60 * 1000;
+              const prevMap = new Map();
+              for (const v of prev) prevMap.set(v.id, v);
+              const resultado = [];
+              // 1. Mantener todos los vuelos inyectados vigentes (aunque exista planner)
+              for (const v of prev) {
+                const llegada = parsePlanificadorTime(v.horaLlegada);
+                const vigente = llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
+                if (v.__deRutaEnvio && vigente) resultado.push(v);
+              }
+              // 2. Agregar vuelos nuevos del planificador solo si no hay uno inyectado con mismo id
+              for (const v of vuelosNuevos) {
+                if (prevMap.has(v.id) && prevMap.get(v.id).__deRutaEnvio) continue; // hay inyectado, descartar planner
+                const llegada = parsePlanificadorTime(v.horaLlegada);
+                const vigente = llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
+                if (!vigente) continue;
+                // preservar historial si existía
+                const anterior = prevMap.get(v.id);
+                let historial = [];
+                if (anterior) {
+                  if (Array.isArray(anterior.__historialEnviosCompletos)) historial = [...anterior.__historialEnviosCompletos];
+                  else if (Array.isArray(anterior.enviosAsignados) && anterior.enviosAsignados.length > 0) historial = [...anterior.enviosAsignados];
+                }
+                let enviosAsignados = Array.isArray(v.enviosAsignados) && v.enviosAsignados.length > 0 ? v.enviosAsignados : historial;
+                resultado.push({
+                  ...v,
+                  enviosAsignados,
+                  __tuvoEnvios: enviosAsignados.length > 0,
+                  __historialEnviosCompletos: historial
+                });
+              }
+              // 3. Mantener vuelos previos no inyectados que siguen vigentes y que no fueron reemplazados por nuevos
+              for (const v of prev) {
+                if (v.__deRutaEnvio) continue; // ya incluidos
+                if (vuelosNuevos.find(x => x.id === v.id)) continue; // reemplazado
+                const llegada = parsePlanificadorTime(v.horaLlegada);
+                const vigente = llegada && llegada.getTime() > (ahoraSimulacion - margenSeguridad);
+                if (vigente) resultado.push(v);
+              }
+
+              return resultado;
+            });
+            setRawVuelos(vuelosNuevos);
           } catch (e) {
             console.error('WS refresh error:', e);
           }
@@ -694,6 +743,7 @@ export default function Mapa() {
     let cancelled = false;
 
     async function loadUltimoCiclo() {
+
       try {
         const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
         if (!mounted || cancelled) return;
@@ -703,6 +753,21 @@ export default function Mapa() {
           return;
         }
         const data = await res.json();
+        // LOG DETALLADO: mostrar ciclo, timestamp y contenido de aeropuertos
+        console.log('[DEBUG] Respuesta de /vuelos-ultimo-ciclo:', {
+          ciclo: data?.ciclo,
+          fecha: new Date().toISOString(),
+          aeropuertos: data?.aeropuertos,
+          vuelos: data?.vuelos,
+        });
+        if (Array.isArray(data?.aeropuertos)) {
+          console.log('[DEBUG] Aeropuertos recibidos (length):', data.aeropuertos.length);
+          data.aeropuertos.forEach((a, i) => {
+            console.log(`[DEBUG] Aeropuerto[${i}]:`, a);
+          });
+        } else {
+          console.warn('[DEBUG] Aeropuertos no es un array:', data?.aeropuertos);
+        }
         setHorizonte(data?.horizonte || null);
         const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
 
@@ -776,10 +841,11 @@ export default function Mapa() {
           }
 
           return resultado;
-        }); setRawVuelos(vuelosNuevos);
+        });
+        setRawVuelos(vuelosNuevos);
 
       } catch (err) {
-        console.error("fetch vuelos-ultimo-ciclo:", err);
+        console.error('[DEBUG] Error al obtener /vuelos-ultimo-ciclo:', err);
         if (mounted) setRawVuelos([]);
       }
     }
