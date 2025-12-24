@@ -774,22 +774,14 @@ export default function Mapa() {
         // ✅ NUEVO: Actualizar aeropuertos dinámicos con capacidades desde backend
         if (Array.isArray(data?.aeropuertos)) {
           setDynamicAirports(data.aeropuertos);
-          // Aplicar solo DECREMENTOS del planificador (envíos entregados)
+          // Sincronizar SIEMPRE la capacidad ocupada con el valor del backend
           setLocalAirportCapacities(prevLocal => {
             const newLocal = { ...prevLocal };
             data.aeropuertos.forEach(aeropuerto => {
               const id = aeropuerto.id ?? aeropuerto.idAeropuerto;
               if (id != null) {
                 const capacidadPlanificador = aeropuerto.capacidadOcupada ?? 0;
-                const capacidadActual = prevLocal[id] ?? capacidadPlanificador;
-                // Solo aplicar si el planificador reporta MENOS capacidad (entrega)
-                if (capacidadPlanificador < capacidadActual) {
-                  newLocal[id] = capacidadPlanificador;
-                }
-                // Si no existe en prevLocal, inicializar con valor del planificador
-                if (!(id in prevLocal)) {
-                  newLocal[id] = capacidadPlanificador;
-                }
+                newLocal[id] = capacidadPlanificador;
               }
             });
             return newLocal;
