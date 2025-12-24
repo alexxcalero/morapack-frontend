@@ -610,6 +610,7 @@ export default function Mapa() {
             setHorizonte(data?.horizonte || null);
             const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
             if (Array.isArray(data?.aeropuertos)) {
+              console.log('🛰️ Aeropuertos recibidos del backend:', data.aeropuertos);
               setDynamicAirports(data.aeropuertos);
               // Aplicar solo DECREMENTOS del planificador (envíos entregados)
               setLocalAirportCapacities(prevLocal => {
