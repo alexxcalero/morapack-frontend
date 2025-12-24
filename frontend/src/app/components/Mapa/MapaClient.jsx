@@ -6,4 +6,6 @@ const Mapa = dynamic(() => import("./Mapa"), {
   ssr: false,
 });
 
-export default Mapa;
+export default function MapaClient(props) {
+  return <Mapa {...props} />;
+}

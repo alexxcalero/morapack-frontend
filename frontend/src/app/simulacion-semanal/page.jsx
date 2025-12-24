@@ -7,7 +7,7 @@ export const metadata = {
 export default function SimulacionSemanal() {
   return (
     <main>
-      <MapaClient />
+      <MapaClient tipoSimulacion="semanal" />
     </main>
   );
 }

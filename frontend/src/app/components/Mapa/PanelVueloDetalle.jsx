@@ -9,6 +9,30 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
     useEffect(() => { const u = subscribe(ms => setNowMs(ms)); return () => u(); }, []);
     if (!vuelo) return null;
 
+    // 🔍 Debug: Ver qué datos están llegando
+    useEffect(() => {
+        if (vuelo?.idTramo) {
+            console.log('🔍 [PanelVueloDetalle] Datos del vuelo:', {
+                id: vuelo.idTramo,
+                capacidadMaxima: vuelo.raw?.capacidadMaxima,
+                capacidad_maxima: vuelo.raw?.capacidad_maxima,
+                capacidadOcupada: vuelo.raw?.capacidadOcupada,
+                capacidad_ocupada: vuelo.raw?.capacidad_ocupada,
+                horaOrigen: vuelo.horaOrigen,
+                horaOrigenISO: vuelo.horaOrigen?.toISOString(),
+                horaOrigenLocale: vuelo.horaOrigen?.toLocaleString(),
+                horaDestino: vuelo.horaDestino,
+                horaDestinoISO: vuelo.horaDestino?.toISOString(),
+                horaDestinoLocale: vuelo.horaDestino?.toLocaleString(),
+                raw: vuelo.raw?.horaSalida,
+                rawLlegada: vuelo.raw?.horaLlegada,
+                navegadorTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                navegadorOffset: new Date().getTimezoneOffset(),
+                todosLosCamposRaw: Object.keys(vuelo.raw || {})
+            });
+        }
+    }, [vuelo?.idTramo, vuelo?.horaOrigen, vuelo?.horaDestino]);
+
     // Envíos realmente transportados (actuales o históricos completados)
     let enviosAsignados = Array.isArray(vuelo.raw?.enviosAsignados) && vuelo.raw.enviosAsignados.length > 0
         ? vuelo.raw.enviosAsignados
@@ -23,13 +47,18 @@ export default function PanelVueloDetalle({ vuelo, onClose }) {
 
     console.log(`✈️ Vuelo #${vuelo?.idTramo}: ${enviosAsignados.length} transportados, ${enviosPlanificados.length} planificados`);
 
-    const capacidadMax = vuelo.raw?.capacidadMaxima ?? 300;
     // Calcular capacidad ocupada usando historial si no hay envíos actuales
     let capacidadOcupada = Array.isArray(vuelo.raw?.enviosAsignados) && vuelo.raw.enviosAsignados.length > 0
         ? vuelo.raw.enviosAsignados.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
         : (Array.isArray(vuelo.raw?.__historialEnviosCompletos) && vuelo.raw.__historialEnviosCompletos.length > 0
             ? vuelo.raw.__historialEnviosCompletos.reduce((sum, e) => sum + (e.cantidad ?? e.cantidadAsignada ?? 0), 0)
-            : 0);
+            : (vuelo.raw?.capacidadOcupada ?? 0));
+    // Usar capacidad máxima del backend, o si no existe, usar la capacidad ocupada recibida
+    let capacidadMax = vuelo.raw?.capacidadMaxima || capacidadOcupada || 300;
+    // Si la capacidad ocupada es mayor que la máxima, ajustar la máxima para evitar porcentajes > 100%
+    if (capacidadOcupada > capacidadMax) {
+      capacidadMax = capacidadOcupada;
+    }
     const capacidadPct = capacidadMax > 0 ? Math.round((capacidadOcupada / capacidadMax) * 100) : 0;
     const progreso = Math.max(0, Math.min(100, ((vuelo.pos?.progreso ?? 0) * 100)));
 
