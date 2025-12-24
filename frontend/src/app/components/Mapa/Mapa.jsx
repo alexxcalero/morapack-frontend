@@ -598,14 +598,19 @@ export default function Mapa() {
       }
 
       if (message?.tipo === 'update_ciclo') {
+        console.log('🟢 Evento update_ciclo recibido por websocket');
         // 🔄 Incrementar contador de ciclos para que el catálogo refresque
         setCicloActual(prev => prev + 1);
 
         // Refrescar de inmediato los datos del último ciclo
         (async () => {
           try {
+            console.log('🌐 Realizando fetch a /api/planificador/vuelos-ultimo-ciclo');
             const res = await fetch(`${API_BASE}/api/planificador/vuelos-ultimo-ciclo`);
-            if (!res.ok) return;
+            if (!res.ok) {
+              console.warn('❌ Fetch a /api/planificador/vuelos-ultimo-ciclo falló:', res.status);
+              return;
+            }
             const data = await res.json();
             setHorizonte(data?.horizonte || null);
             const vuelosNuevos = Array.isArray(data?.vuelos) ? data.vuelos : [];
